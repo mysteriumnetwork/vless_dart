@@ -22,12 +22,26 @@ class VPNUtils {
     var status: FlutterEventSink?
     private var vpnStatusObserver: NSObjectProtocol?
 
+    /// Picks only our own manager. The host app also has WireGuard and OpenVPN
+    /// configurations, and adopting one of those would make `configureVPN`
+    /// overwrite another protocol's saved profile.
+    private func ours(_ managers: [NETunnelProviderManager]?) -> NETunnelProviderManager? {
+        guard let bundleId = providerBundleIdentifier else { return nil }
+        return managers?.first {
+            ($0.protocolConfiguration as? NETunnelProviderProtocol)?
+                .providerBundleIdentifier == bundleId
+        }
+    }
+
     func loadProviderManager(completion: @escaping (Error?) -> Void) {
         NETunnelProviderManager.loadAllFromPreferences { managers, error in
             if let error {
                 completion(error)
             } else {
-                self.providerManager = managers?.first
+                self.providerManager = self.ours(managers)
+                // Observe from here, not from connect: a relaunch over a live
+                // tunnel, or a change made in Settings, must still report status.
+                self.observeStatus()
                 completion(nil)
             }
         }
@@ -65,6 +79,7 @@ class VPNUtils {
                 }
                 if let existing {
                     self.providerManager = existing
+                    self.observeStatus()
                 }
                 result(existing)
             } catch {
@@ -106,7 +121,8 @@ class VPNUtils {
                         completion(error)
                         return
                     }
-                    self.providerManager = managers?.first
+                    self.providerManager = self.ours(managers) ?? manager
+                    self.observeStatus()
                     completion(nil)
                 }
             }
@@ -206,7 +222,8 @@ class VPNUtils {
 
     func removeTunnelConfiguration(completion: @escaping (Error?) -> Void) {
         guard let manager = providerManager else {
-            completion(nil)
+            // Reporting success here would claim a removal that never happened.
+            completion(Self.error(-11, "No tunnel configuration to remove"))
             return
         }
         manager.removeFromPreferences { error in
@@ -236,14 +253,15 @@ class VPNUtils {
         NSError(domain: "VlessDart", code: code, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
-    private func observeStatus() {
+    func observeStatus() {
         if let observer = vpnStatusObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        guard let connection = providerManager?.connection else { return }
         vpnStatusObserver = NotificationCenter.default.addObserver(
             forName: .NEVPNStatusDidChange,
-            object: providerManager?.connection,
-            queue: nil
+            object: connection,
+            queue: .main
         ) { [weak self] _ in
             guard let self else { return }
             let current = Self.string(from: self.providerManager?.connection.status ?? .invalid)

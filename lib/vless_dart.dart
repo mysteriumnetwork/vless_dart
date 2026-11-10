@@ -24,8 +24,11 @@ class VlessDart {
 
   static const MethodChannel _channelControl = MethodChannel(_methodChannelVpnControl);
 
-  static Stream<String> _vpnStatusSnapshot() =>
-      const EventChannel(_eventChannelVpnStatus).receiveBroadcastStream().cast();
+  static const EventChannel _statusChannel = EventChannel(_eventChannelVpnStatus);
+
+  /// Created once: `receiveBroadcastStream()` re-registers the handler on every
+  /// call, so a second listener would silently kill the first one's stream.
+  static Stream<ConnectionStatus>? _statusStream;
 
   /// Whether [initialize] has run.
   bool initialized = false;
@@ -37,13 +40,14 @@ class VlessDart {
       'These values are required on iOS and macOS.',
     );
 
-    initialized = true;
     try {
       await _channelControl.invokeMethod('initialize', <String, dynamic>{
         'providerBundleIdentifier': providerBundleIdentifier,
         'localizedDescription': localizedDescription,
       });
+      initialized = true;
     } catch (e) {
+      initialized = false;
       throw Exception('Failed to initialize VPN: $e');
     }
   }
@@ -71,8 +75,15 @@ class VlessDart {
   }
 
   /// Disconnect from the VPN.
-  void disconnect() {
-    _channelControl.invokeMethod('disconnect');
+  ///
+  /// Awaitable so a failure surfaces to the caller; dropping the future turned
+  /// one into an unhandled async error.
+  Future<void> disconnect() async {
+    try {
+      await _channelControl.invokeMethod('disconnect');
+    } on PlatformException catch (e) {
+      throw Exception('disconnect failed: ${e.message}');
+    }
   }
 
   /// Whether the tunnel is currently up.
@@ -104,10 +115,12 @@ class VlessDart {
   }
 
   /// Status updates for the lifetime of the connection.
-  Stream<ConnectionStatus> statusStream() => _vpnStatusSnapshot()
-      .asBroadcastStream()
+  Stream<ConnectionStatus> statusStream() => _statusStream ??= _statusChannel
+      .receiveBroadcastStream()
+      .cast<String>()
+      .map(_strToStatus)
       .distinct()
-      .map((String event) => _strToStatus(event));
+      .asBroadcastStream();
 
   /// Whether a NetworkExtension tunnel configuration already exists.
   Future<bool> checkTunnelConfiguration() async {

@@ -51,11 +51,22 @@ public class VlessDartPlugin: NSObject, FlutterPlugin {
 
         status.setStreamHandler(StatusHandler())
         control.setMethodCallHandler { [weak self] call, result in
-            self?.route(call, result: result)
+            self?.route(call, rawResult: result)
         }
     }
 
-    private func route(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    private func route(_ call: FlutterMethodCall, rawResult: @escaping FlutterResult) {
+        // FlutterResult must be invoked on the platform thread; the
+        // NETunnelProviderManager completions and the Task in
+        // checkTunnelConfiguration all reply from elsewhere.
+        let result: FlutterResult = { value in
+            if Thread.isMainThread {
+                rawResult(value)
+            } else {
+                DispatchQueue.main.async { rawResult(value) }
+            }
+        }
+
         switch call.method {
         case "initialize":
             guard let args = call.arguments as? [String: Any],

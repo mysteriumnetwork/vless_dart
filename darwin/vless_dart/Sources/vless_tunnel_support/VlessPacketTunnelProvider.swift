@@ -165,16 +165,22 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func teardown() {
-        guard started || hev.isRunning else {
-            XRayStop()
-            return
-        }
         started = false
         footprintTimer?.cancel()
         footprintTimer = nil
-        if hev.requestStop(), !hev.waitForExit(timeout: hevShutdownTimeout) {
+
+        // Unconditional: during the startup window neither `started` nor
+        // `isRunning` is true yet, and skipping the stop there leaks the worker
+        // so the next connect spawns a second one.
+        _ = hev.requestStop()
+
+        // quit() is what makes the blocking Socks5Tunnel.run return; waiting
+        // first would just burn the whole timeout every disconnect.
+        if !hev.waitForExit(timeout: 0) {
             Socks5Tunnel.quit()
+            _ = hev.waitForExit(timeout: hevShutdownTimeout)
         }
+
         XRayStop()
     }
 
@@ -221,7 +227,8 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
     ) {
         // tunnelRemoteAddress must be an IP literal; a hostname is rejected with
         // NETunnelProviderErrorDomain Code=1.
-        guard let resolved = resolve(serverAddress) else {
+        let addresses = resolveAll(serverAddress)
+        guard let resolved = addresses.first else {
             os_log("[TUNNEL] cannot resolve %@", log: log, type: .error, serverAddress)
             completion(TunnelConfigError.unresolvableServer)
             return
@@ -234,13 +241,16 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
 
         let ipv4 = NEIPv4Settings(addresses: [tunnelAddress], subnetMasks: ["255.255.255.0"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
-        // Without this the tunnel routes its own VLESS transport into itself.
-        ipv4.excludedRoutes = [NEIPv4Route(destinationAddress: resolved,
-                                           subnetMask: "255.255.255.255")]
+        // Without these the tunnel routes its own VLESS transport into itself.
+        // Every A record is excluded, not just the one used as the remote
+        // address, because Xray dials by hostname and may pick any of them.
+        ipv4.excludedRoutes = addresses.map {
+            NEIPv4Route(destinationAddress: $0, subnetMask: "255.255.255.255")
+        }
         settings.ipv4Settings = ipv4
 
-        // A public resolver reached through the tunnel. TunnelDNSPolicy's virtual
-        // server needs Xray's DNS app, which the trimmed distro leaves out.
+        // Public resolvers reached through the tunnel. A virtual DNS server
+        // would need Xray's DNS app, which the trimmed distro leaves out.
         let dns = NEDNSSettings(servers: ["1.1.1.1", "1.0.0.1"])
         dns.matchDomains = [""]
         settings.dnsSettings = dns
@@ -248,21 +258,31 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
         setTunnelNetworkSettings(settings, completionHandler: completion)
     }
 
-    private func resolve(_ host: String) -> String? {
+    /// Every IPv4 address the host resolves to, so all of them can be excluded.
+    private func resolveAll(_ host: String) -> [String] {
         var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil,
                              ai_addr: nil, ai_next: nil)
         var info: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, nil, &hints, &info) == 0, let first = info else { return nil }
+        guard getaddrinfo(host, nil, &hints, &info) == 0 else { return [] }
         defer { freeaddrinfo(info) }
 
-        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-        guard let addr = first.pointee.ai_addr else { return nil }
-        let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-        var sinAddr = sin.sin_addr
-        guard inet_ntop(AF_INET, &sinAddr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else {
-            return nil
+        var out: [String] = []
+        var node = info
+        while let current = node {
+            if let addr = current.pointee.ai_addr {
+                var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                if inet_ntop(AF_INET, &sin.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                    let text = String(cString: buffer)
+                    if !out.contains(text) {
+                        out.append(text)
+                    }
+                }
+            }
+            node = current.pointee.ai_next
         }
-        return String(cString: buffer)
+        return out
     }
+
 }
