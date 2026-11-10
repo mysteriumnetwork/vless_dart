@@ -24,8 +24,15 @@ public class VlessDartPlugin: NSObject, FlutterPlugin {
 
     private var initialized = false
 
+    /// Held for the process lifetime. Nothing else owns the plugin — the
+    /// channel only holds the handler closure — so without this the instance
+    /// deallocates immediately and every method call silently never replies.
+    private static var shared: VlessDartPlugin?
+
     public static func register(with registrar: FlutterPluginRegistrar) {
-        VlessDartPlugin().onRegister(registrar)
+        let plugin = VlessDartPlugin()
+        shared = plugin
+        plugin.onRegister(registrar)
     }
 
     public func onRegister(_ registrar: FlutterPluginRegistrar) {

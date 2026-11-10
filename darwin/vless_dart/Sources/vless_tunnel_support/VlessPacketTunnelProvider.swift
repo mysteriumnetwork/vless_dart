@@ -29,6 +29,7 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
     private let runtimeQueue = DispatchQueue(label: "com.mysteriumvpn.vless.runtime")
     private var hevLogURL: URL?
     private var started = false
+    private var footprintTimer: DispatchSourceTimer?
 
     override public init() { super.init() }
 
@@ -38,12 +39,20 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
     ) {
         os_log("[TUNNEL] startTunnel", log: log, type: .info)
 
-        guard let proto = protocolConfiguration as? NETunnelProviderProtocol,
-              let raw = proto.providerConfiguration?["config"] as? Data
-        else {
+        guard let proto = protocolConfiguration as? NETunnelProviderProtocol else {
+            os_log("[TUNNEL] protocolConfiguration is not NETunnelProviderProtocol",
+                   log: log, type: .error)
             completionHandler(TunnelConfigError.malformedConfig)
             return
         }
+        guard let raw = proto.providerConfiguration?["config"] as? Data else {
+            os_log("[TUNNEL] providerConfiguration missing \"config\"; keys=%@",
+                   log: log, type: .error,
+                   String(describing: proto.providerConfiguration?.keys.sorted()))
+            completionHandler(TunnelConfigError.malformedConfig)
+            return
+        }
+        os_log("[TUNNEL] config %d bytes", log: log, type: .info, raw.count)
 
         let prepared: PreparedTunnelConfig
         do {
@@ -58,18 +67,29 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
         // the UI cannot show connected over a tunnel that drops packets.
         reasserting = true
 
+        os_log("[TUNNEL] prepared; server=%@ socksPort=%d", log: log, type: .info,
+               prepared.serverAddress, prepared.socksPort)
+
         applyNetworkSettings(serverAddress: prepared.serverAddress) { [weak self] error in
-            guard let self else { return }
+            guard let self else {
+                os_log("[TUNNEL] provider deallocated during setup", log: log, type: .error)
+                completionHandler(TunnelConfigError.malformedConfig)
+                return
+            }
             if let error {
+                os_log("[TUNNEL] setTunnelNetworkSettings failed: %@", log: log, type: .error,
+                       error.localizedDescription)
                 completionHandler(error)
                 return
             }
+            os_log("[TUNNEL] network settings applied", log: log, type: .info)
             self.runtimeQueue.async {
                 do {
                     try self.startRuntime(prepared)
                     self.reasserting = false
                     self.started = true
                     os_log("[TUNNEL] forwarding ready", log: log, type: .info)
+                    self.startFootprintSampling()
                     completionHandler(nil)
                 } catch {
                     os_log("[TUNNEL] start failed: %@", log: log, type: .error, "\(error)")
@@ -92,11 +112,16 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         let stats = Socks5Tunnel.stats
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "totalDownload": stats.down.bytes,
             "totalUpload": stats.up.bytes,
             "latestHandshake": 0,
         ]
+        // The extension's own footprint — the app cannot measure this itself,
+        // and it is the number that decides whether jetsam kills the tunnel.
+        if let footprint = Self.footprintBytes() {
+            payload["footprintBytes"] = footprint
+        }
         completionHandler?(try? JSONSerialization.data(withJSONObject: payload))
     }
 
@@ -145,10 +170,45 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         started = false
+        footprintTimer?.cancel()
+        footprintTimer = nil
         if hev.requestStop(), !hev.waitForExit(timeout: hevShutdownTimeout) {
             Socks5Tunnel.quit()
         }
         XRayStop()
+    }
+
+    // MARK: - Memory
+
+    /// iOS kills a Network Extension past roughly 50 MB, and it measures
+    /// `phys_footprint` — not resident size. Sampling it is the only way to know
+    /// how much headroom a running tunnel actually has.
+    public static func footprintBytes() -> UInt64? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return info.phys_footprint
+    }
+
+    private func startFootprintSampling() {
+        footprintTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: runtimeQueue)
+        timer.schedule(deadline: .now(), repeating: 5)
+        timer.setEventHandler { [weak self] in
+            guard self != nil, let bytes = Self.footprintBytes() else { return }
+            let stats = Socks5Tunnel.stats
+            os_log("[TUNNEL] footprint=%.1f MB down=%d up=%d", log: log, type: .info,
+                   Double(bytes) / 1_048_576, stats.down.bytes, stats.up.bytes)
+        }
+        timer.resume()
+        footprintTimer = timer
     }
 
     // MARK: - Network settings
@@ -159,18 +219,29 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
         serverAddress: String,
         completion: @escaping (Error?) -> Void
     ) {
-        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: serverAddress)
+        // tunnelRemoteAddress must be an IP literal; a hostname is rejected with
+        // NETunnelProviderErrorDomain Code=1.
+        guard let resolved = resolve(serverAddress) else {
+            os_log("[TUNNEL] cannot resolve %@", log: log, type: .error, serverAddress)
+            completion(TunnelConfigError.unresolvableServer)
+            return
+        }
+        os_log("[TUNNEL] applying settings; server=%@ -> %@", log: log, type: .info,
+               serverAddress, resolved)
+
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: resolved)
         settings.mtu = NSNumber(value: tunnelMTU)
 
         let ipv4 = NEIPv4Settings(addresses: [tunnelAddress], subnetMasks: ["255.255.255.0"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
-        if let serverIP = resolve(serverAddress) {
-            ipv4.excludedRoutes = [NEIPv4Route(destinationAddress: serverIP,
-                                               subnetMask: "255.255.255.255")]
-        }
+        // Without this the tunnel routes its own VLESS transport into itself.
+        ipv4.excludedRoutes = [NEIPv4Route(destinationAddress: resolved,
+                                           subnetMask: "255.255.255.255")]
         settings.ipv4Settings = ipv4
 
-        let dns = NEDNSSettings(servers: [TunnelDNSPolicy.virtualServer])
+        // A public resolver reached through the tunnel. TunnelDNSPolicy's virtual
+        // server needs Xray's DNS app, which the trimmed distro leaves out.
+        let dns = NEDNSSettings(servers: ["1.1.1.1", "1.0.0.1"])
         dns.matchDomains = [""]
         settings.dnsSettings = dns
 

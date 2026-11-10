@@ -22,6 +22,7 @@ public enum TunnelConfigError: Error {
     case noSocksInbound
     case noProxyOutbound
     case noFreePort
+    case unresolvableServer
 }
 
 /// Fills in the placeholders the Dart layer leaves behind.
