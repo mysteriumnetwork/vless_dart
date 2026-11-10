@@ -36,24 +36,39 @@ fi
 # check for the binary rather than trusting its self-report.
 command -v gomobile >/dev/null || { echo "error: gomobile not installed" >&2; exit 1; }
 
-mkdir -p "$OUT"
+WORK="$MODULE/build"
+rm -rf "$WORK/ios" "$WORK/mac"
+mkdir -p "$WORK/ios" "$WORK/mac" "$OUT"
 cd "$MODULE"
 
+# gomobile emits one xcframework per target, and names the inner framework
+# after the output file. SwiftPM's binaryTarget takes a single xcframework, and
+# -create-xcframework rejects mismatched module names — so both builds must be
+# named XRay and then merged.
 echo "==> building iOS"
 gomobile bind -a -ldflags="-s -w" -target=ios -iosversion="$IOS_VERSION" \
-  -o "$OUT/XRay.xcframework" .
+  -o "$WORK/ios/XRay.xcframework" .
 
 echo "==> building macOS"
 gomobile bind -a -ldflags="-s -w" -target=macos \
-  -o "$OUT/XRayMac.xcframework" .
+  -o "$WORK/mac/XRay.xcframework" .
+
+echo "==> merging slices"
+rm -rf "$OUT/XRay.xcframework"
+xcodebuild -create-xcframework \
+  -framework "$WORK/ios/XRay.xcframework/ios-arm64/XRay.framework" \
+  -framework "$WORK/ios/XRay.xcframework/ios-arm64_x86_64-simulator/XRay.framework" \
+  -framework "$WORK/mac/XRay.xcframework/macos-arm64_x86_64/XRay.framework" \
+  -output "$OUT/XRay.xcframework" >/dev/null
 
 echo
-echo "==> artifacts"
-du -sh "$OUT"/*.xcframework
+echo "==> slices"
+ls "$OUT/XRay.xcframework" | grep -v Info.plist | sed 's/^/   /'
 
 echo
-echo "==> device slice (what ships)"
-find "$OUT/XRay.xcframework/ios-arm64" -name XRay -type f -exec du -h {} \;
+echo "==> sizes"
+du -sh "$OUT/XRay.xcframework"
+find "$OUT/XRay.xcframework/ios-arm64" -name XRay -type f -exec du -h {} \; | sed 's/^/   device slice: /'
 
 echo
 echo "==> checksum for a remote binaryTarget"

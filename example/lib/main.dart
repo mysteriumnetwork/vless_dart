@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:vless_dart/vless_dart.dart';
@@ -11,7 +12,10 @@ const _defaultUri =
     '?encryption=none&host=supervpn-testnet-01.mysterium.network&path=%2Fvless'
     '&security=tls&sni=supervpn-testnet-01.mysterium.network&type=ws#Mysterium%20VLESS';
 
-const _providerBundleIdentifier = 'com.mysteriumvpn.vlessDartExample.XrayTunnel';
+/// Each platform carries its own packet tunnel extension target.
+final String _providerBundleIdentifier = Platform.isMacOS
+    ? 'com.mysteriumvpn.vlessDartExample.XrayTunnelMac'
+    : 'com.mysteriumvpn.vlessDartExample.XrayTunnel';
 const _localizedDescription = 'Mysterium VLESS Example';
 
 void main() => runApp(const _App());
