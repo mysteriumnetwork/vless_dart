@@ -1,11 +1,27 @@
 .DEFAULT_GOAL := test
 
 # ─── Setup ───────────────────────────────────────────────────────────────────
+# Everything a fresh clone needs to build.
 init:
 	fvm flutter pub get
+	@$(MAKE) --no-print-directory ensure-core
 
-init-example:
+init-example: init
 	cd example && fvm flutter pub get
+
+# The Xray core is not committed: it is ~185 MB and rebuilt on every Xray bump.
+# While Package.swift consumes it from a local path, a clone has to build it
+# once. Once the binaryTarget points at a published release, SwiftPM downloads
+# and checksum-verifies it instead and this becomes a no-op.
+ensure-core:
+	@if ! grep -q 'path: "Artifacts/XRay.xcframework"' darwin/vless_dart/Package.swift; then \
+	  echo "==> Xray core: fetched from a published release by SwiftPM"; \
+	elif [ -d darwin/vless_dart/Artifacts/XRay.xcframework ]; then \
+	  echo "==> Xray core: present"; \
+	else \
+	  echo "==> Xray core: missing, building it now (several minutes)"; \
+	  ./scripts/build_xray_apple.sh; \
+	fi
 
 clean:
 	fvm flutter clean
