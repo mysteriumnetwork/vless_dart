@@ -1,0 +1,67 @@
+name: CI
+
+# Dart and Go only. The Swift suite needs a signed macOS build, because the
+# example app that hosts it carries a NetworkExtension entitlement — that is a
+# separate workflow once signing secrets are in place. Until then run it
+# locally with `make test-swift`.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter Version Management CLI
+        uses: flutter-actions/setup-fvm@v1.0 #v1.0 is tag, v1 is branch
+        with:
+          version: 4.0.5
+
+      - name: Install Flutter SDK
+        run: echo yes | fvm use
+
+      - run: fvm flutter pub get
+
+      - name: Format
+        run: fvm dart format --line-length 100 --set-exit-if-changed lib test example/lib
+
+      - name: Analyze
+        run: fvm flutter analyze
+
+      - name: Test
+        run: fvm flutter test
+
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: third_party/xray-mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: third_party/xray-mobile/go.mod
+          cache-dependency-path: third_party/xray-mobile/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      # Guards the trimmed feature set: this boots Xray with the exact config
+      # the Dart layer emits, so a missing registration in distro.go fails here
+      # rather than on a device.
+      - name: Test
+        run: go test ./...
+
+      - name: Check go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
