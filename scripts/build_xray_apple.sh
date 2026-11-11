@@ -56,12 +56,40 @@ echo "==> building macOS"
 gomobile bind -a -ldflags="-s -w" -target=macos -macosversion="$MACOS_VERSION" \
   -o "$WORK/mac/XRay.xcframework" .
 
-echo "==> merging slices"
-rm -rf "$OUT/XRay.xcframework"
+# gomobile emits each slice as a .framework wrapping a static ar archive. Ship
+# it as a -library xcframework instead: Xcode embeds a binary target delivered
+# as a .framework into the app bundle even when it is static, then fails to
+# codesign the archive ("invalid signature", 0xe8008014) and the iOS install
+# dies. A -library xcframework is linked and never embedded.
+#
+# Headers nest under Headers/XRay/ because they are copied into the shared
+# $BUILT_PRODUCTS_DIR/include: Tun2SocksKit already puts a module.modulemap at
+# its root, and two at the same path break the build.
+repackage_slice() { # <gomobile-xcframework> <slice>
+  local src="$1/$2/XRay.framework" dst="$WORK/lib/$2"
+  mkdir -p "$dst/Headers/XRay"
+  cp "$src/Headers/"*.h "$dst/Headers/XRay/"
+  cp "$src/XRay" "$dst/libXRay.a"
+  # The framework module map gomobile writes is not usable outside a framework.
+  {
+    echo "module XRay {"
+    for h in ref.h XRay.objc.h Universe.objc.h XRay.h; do echo "    header \"$h\""; done
+    echo
+    echo "    export *"
+    echo "}"
+  } > "$dst/Headers/XRay/module.modulemap"
+}
+
+echo "==> repackaging slices as a static library"
+rm -rf "$WORK/lib" "$OUT/XRay.xcframework"
+repackage_slice "$WORK/ios/XRay.xcframework" ios-arm64
+repackage_slice "$WORK/ios/XRay.xcframework" ios-arm64_x86_64-simulator
+repackage_slice "$WORK/mac/XRay.xcframework" macos-arm64_x86_64
+
 xcodebuild -create-xcframework \
-  -framework "$WORK/ios/XRay.xcframework/ios-arm64/XRay.framework" \
-  -framework "$WORK/ios/XRay.xcframework/ios-arm64_x86_64-simulator/XRay.framework" \
-  -framework "$WORK/mac/XRay.xcframework/macos-arm64_x86_64/XRay.framework" \
+  -library "$WORK/lib/ios-arm64/libXRay.a"                  -headers "$WORK/lib/ios-arm64/Headers" \
+  -library "$WORK/lib/ios-arm64_x86_64-simulator/libXRay.a" -headers "$WORK/lib/ios-arm64_x86_64-simulator/Headers" \
+  -library "$WORK/lib/macos-arm64_x86_64/libXRay.a"         -headers "$WORK/lib/macos-arm64_x86_64/Headers" \
   -output "$OUT/XRay.xcframework" >/dev/null
 
 echo
@@ -70,7 +98,7 @@ echo "==> verifying deployment targets"
 # core that does not honour the floor Package.swift claims. Fail the build.
 verify_slice() {
   local bin="$1" arch="$2" want="$3" got slice
-  slice="$(basename "$(dirname "$(dirname "$bin")")")"
+  slice="$(basename "$(dirname "$bin")")"
   got="$(otool -arch "$arch" -l "$bin" | grep -A4 LC_BUILD_VERSION \
          | awk '/minos/{print $2}' | sort -u | tr '\n' ' ')"
   got="${got% }"
@@ -83,15 +111,24 @@ verify_slice() {
 
 XC="$OUT/XRay.xcframework"
 rc=0
-verify_slice "$XC/macos-arm64_x86_64/XRay.framework/XRay" arm64  "$MACOS_VERSION" || rc=1
-verify_slice "$XC/macos-arm64_x86_64/XRay.framework/XRay" x86_64 "$MACOS_VERSION" || rc=1
-verify_slice "$XC/ios-arm64/XRay.framework/XRay" arm64 "$IOS_VERSION" || rc=1
-verify_slice "$XC/ios-arm64_x86_64-simulator/XRay.framework/XRay" arm64  "$IOS_VERSION" || rc=1
-verify_slice "$XC/ios-arm64_x86_64-simulator/XRay.framework/XRay" x86_64 "$IOS_VERSION" || rc=1
+verify_slice "$XC/macos-arm64_x86_64/libXRay.a" arm64  "$MACOS_VERSION" || rc=1
+verify_slice "$XC/macos-arm64_x86_64/libXRay.a" x86_64 "$MACOS_VERSION" || rc=1
+verify_slice "$XC/ios-arm64/libXRay.a" arm64 "$IOS_VERSION" || rc=1
+verify_slice "$XC/ios-arm64_x86_64-simulator/libXRay.a" arm64  "$IOS_VERSION" || rc=1
+verify_slice "$XC/ios-arm64_x86_64-simulator/libXRay.a" x86_64 "$IOS_VERSION" || rc=1
 if [ "$rc" -ne 0 ]; then
   echo "   deployment targets do not match IOS_VERSION/MACOS_VERSION" >&2
   exit 1
 fi
+
+echo
+echo "==> verifying packaging form"
+# A .framework here would be embedded by Xcode and fail to codesign on iOS.
+if grep -q FrameworkPath "$XC/Info.plist" || ! grep -q LibraryPath "$XC/Info.plist"; then
+  echo "   FAIL xcframework is not library-form; iOS installs would reject it" >&2
+  exit 1
+fi
+echo "   ok   library-form xcframework (never embedded, so nothing to sign)"
 
 echo
 echo "==> slices"
@@ -100,7 +137,7 @@ ls "$OUT/XRay.xcframework" | grep -v Info.plist | sed 's/^/   /'
 echo
 echo "==> sizes"
 du -sh "$OUT/XRay.xcframework"
-find "$OUT/XRay.xcframework/ios-arm64" -name XRay -type f -exec du -h {} \; | sed 's/^/   device slice: /'
+du -h "$OUT/XRay.xcframework/ios-arm64/libXRay.a" | sed 's/^/   device slice: /'
 
 echo
 echo "==> checksum for a remote binaryTarget"
