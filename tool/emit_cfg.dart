@@ -1,7 +1,7 @@
 // Prints the Xray config lib/src/xray_config.dart emits, with the placeholders
 // the tunnel provider fills at runtime. Used to regenerate the `dartConfig`
-// fixture in third_party/xray-mobile/xray-mobile_test.go, which boots the real
-// config so a config change that Xray rejects fails the Go suite.
+// fixture in vless-apple's third_party/xray-mobile/xray-mobile_test.go, which
+// boots the real config so a change Xray rejects fails that repo's Go suite.
 //
 //   fvm dart run tool/emit_cfg.dart
 //

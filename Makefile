@@ -1,34 +1,12 @@
 .DEFAULT_GOAL := test
 
-# LOCAL_CORE=1 links a locally built Xray core instead of the published
-# release. Read by Package.swift; required when changing third_party/xray-mobile.
-ifdef LOCAL_CORE
-export VLESS_LOCAL_CORE := 1
-endif
-
 # ─── Setup ───────────────────────────────────────────────────────────────────
 # Everything a fresh clone needs to build.
 init:
 	fvm flutter pub get
-	@$(MAKE) --no-print-directory ensure-core
 
 init-example: init
 	cd example && fvm flutter pub get
-
-# The Xray core is not committed: ~185 MB and rebuilt on every Xray bump.
-# SwiftPM fetches a published release by default, so a clone needs no Go
-# toolchain. LOCAL_CORE=1 links a local build instead, building it if absent.
-ensure-core:
-ifdef LOCAL_CORE
-	@if [ -d darwin/vless_dart/Artifacts/XRay.xcframework ]; then \
-	  echo "==> Xray core: local build"; \
-	else \
-	  echo "==> Xray core: no local build, making one now (several minutes)"; \
-	  ./scripts/build_xray_apple.sh; \
-	fi
-else
-	@echo "==> Xray core: published release, fetched and verified by SwiftPM"
-endif
 
 clean:
 	fvm flutter clean
@@ -44,29 +22,8 @@ analyze:
 test: init
 	fvm flutter test
 
-# Swift unit tests for the tunnel-support module, via the macOS example.
-# `swift test` cannot resolve the package standalone: FlutterFramework is a path
-# dependency that only exists inside a Flutter build.
-# The Flutter-generated plugin package declares macOS 10.15, which Xcode clamps
-# to 12.0 — below this package's floor, so the test action refuses to link our
-# product. Building tolerates it; only testing fails. That file is ephemeral and
-# gitignored, so raise it in place, reading the floor from Package.swift.
-FGPSP = example/macos/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
-MACOS_FLOOR = $(shell sed -n 's/.*\.macOS("\([0-9.]*\)").*/\1/p' darwin/vless_dart/Package.swift)
-
-test-swift: init-example
-	@if [ -f $(FGPSP) ]; then \
-	  sed -i '' 's/\.macOS("[0-9.]*")/.macOS("$(MACOS_FLOOR)")/' $(FGPSP); \
-	  echo "==> pinned generated plugin package to macOS $(MACOS_FLOOR)"; \
-	fi
-	cd example/macos && xcodebuild test -workspace Runner.xcworkspace -scheme Runner \
-	  -destination 'platform=macOS,arch=arm64' -allowProvisioningUpdates -quiet
-
-test-go:
-	cd third_party/xray-mobile && go test ./...
-
-# format check + analyze + every suite, as CI would run it
-check: format analyze test test-go test-swift
+# format + analyze + the Dart suite, as CI would run it
+check: format analyze test
 
 # ─── Example app ─────────────────────────────────────────────────────────────────
 run-example: init-example
@@ -74,16 +31,6 @@ run-example: init-example
 
 build-example-apk: init-example
 	cd example && fvm flutter build apk --debug
-
-# ─── Xray core ───────────────────────────────────────────────────────────────────
-# Builds iOS + macOS and merges them into one XCFramework under
-# darwin/vless_dart/Artifacts/, where Package.swift expects it.
-build-core:
-	./scripts/build_xray_apple.sh
-
-# Drop the local build so SwiftPM goes back to the published release.
-clean-core:
-	rm -rf darwin/vless_dart/Artifacts/XRay.xcframework
 
 # ─── macOS run ───────────────────────────────────────────────────────────────────
 # `flutter build macos` writes to example/build/macos, but LaunchServices

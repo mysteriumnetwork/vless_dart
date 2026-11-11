@@ -1,7 +1,8 @@
 # vless_dart
 
-VLESS client for Flutter on **iOS and macOS**, built on a trimmed
-[Xray-core](https://github.com/XTLS/Xray-core) and NetworkExtension.
+VLESS client for Flutter on **iOS and macOS**. The control plane; the tunnel
+engine lives in
+[vless-apple](https://github.com/mysteriumnetwork/vless-apple).
 
 ## What it supports
 
@@ -57,62 +58,35 @@ import vless_tunnel_support
 class PacketTunnelProvider: VlessPacketTunnelProvider {}
 ```
 
-Add the package's **`vless-tunnel-support`** product to that extension target
-(not to the app target — the app gets `vless-dart` through Flutter).
+Add the **`vless-tunnel-support`** product from
+[vless-apple](https://github.com/mysteriumnetwork/vless-apple) to that extension
+target (not to the app target — the app gets `vless-dart` through Flutter).
 
 The loopback SOCKS inbound binds a free port and gets fresh credentials per
 session, both minted inside the extension so they never cross a process
 boundary.
 
-IPv6 is captured by the tunnel and dropped at Xray, so clients fall back to
-IPv4. Leaving it uncaptured would route IPv6 *around* the tunnel, leaking the
-user's real address on any dual-stack network.
+IPv6 is captured by the tunnel — leaving it uncaptured would route IPv6
+*around* the tunnel, leaking the user's real address on any dual-stack network
+— and then proxied rather than dropped. Dropping it reaches the client as
+"connected, then closed", which Chrome never retries over IPv4. Names resolve
+v4-only through the config's `queryStrategy` instead.
 
-## The Xray core
+## The tunnel engine
 
-`Package.swift` links a published `XRay.xcframework` by default, so a clone
-builds with no Go toolchain — SwiftPM downloads it and verifies its checksum.
+The Xray core, the tun2socks bridge and `VlessPacketTunnelProvider` live in
+[vless-apple](https://github.com/mysteriumnetwork/vless-apple), along with the
+Swift suite and the instructions for building and publishing a core.
 
-To work on the core itself:
-
-```sh
-make build-core               # gomobile bind for iOS + macOS, merged + verified
-make build-macos LOCAL_CORE=1 # link that local build instead of the release
-make clean-core               # drop it and go back to the release
-```
-
-`LOCAL_CORE=1` sets `VLESS_LOCAL_CORE`, which `Package.swift` reads. It has to
-be an environment variable rather than a check for the artifact on disk:
-SwiftPM caches manifest evaluation, and only a change to the manifest's
-contents or its environment re-triggers it, so a disk check would be served
-stale. Building the core needs full Xcode (not just Command Line Tools) and an
-**arm64** Go toolchain.
-
-The feature set is `third_party/xray-mobile/distro.go` — editing that file is
-how a protocol or transport gets added, and it is deliberately a visible,
-reviewable change.
-
-### Publishing a new core
-
-The artifact is ~59 MB and is rebuilt on every Xray bump, so it is not
-committed.
-
-1. Commit the change to `third_party/xray-mobile` or to the build script.
-2. Tag **that commit** `xray-v<version>` and push the tag. The *Release Xray
-   core* workflow builds and publishes it.
-3. Copy the `url` and `checksum` from the job summary into the `binaryTarget`
-   in `darwin/vless_dart/Package.swift`, and commit that.
-
-The workflow builds the tagged tree, not your working copy — tagging a commit
-that predates the change republishes the old core, and the run still goes
-green. `build_xray_apple.sh` guards the common case by checking each slice's
-deployment target against `IOS_VERSION`/`MACOS_VERSION` and failing instead of
-shipping a core that does not honour the floor `Package.swift` claims.
+This package is deliberately free of them. It is pulled into the app process by
+Flutter, and linking the core there would put a second Go runtime alongside
+WireGuard's — which fails to link — besides colliding with vless-apple's targets
+in the same package graph.
 
 ## Development
 
 ```sh
-make check           # format + analyze + Dart, Go and Swift suites
+make check           # format + analyze + the Dart suite
 make run-macos       # build, sync to the registered bundle, launch
 make run-macos-auto  # same, connects on launch
 make tunnel-logs     # stream the extension's os_log
@@ -123,12 +97,8 @@ make exit-ip         # confirm traffic leaves through the tunnel
 Without that step macOS keeps loading a stale copy of the extension, which looks
 exactly like your changes having no effect.
 
-`test-swift` raises the macOS floor of the Flutter-generated plugin package
-before running. Flutter pins that package to 10.15, below this one's floor;
-Xcode's build action tolerates the mismatch but the test action refuses to link
-against it.
-
 ## Licensing
 
-See [NOTICE](NOTICE) for the third-party components this package builds on and
-their licence terms.
+MIT; see [LICENSE](LICENSE). The third-party components the tunnel engine
+builds on are attributed in
+[vless-apple](https://github.com/mysteriumnetwork/vless-apple)'s NOTICE.

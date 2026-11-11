@@ -5,7 +5,9 @@
 * `VlessDart` API: `initialize`, `setupTunnel`, `connect`, `disconnect`,
   `isConnected`, `getVPNStatus`, `tunnelStatistics`, `statusStream`,
   `checkTunnelConfiguration`, `removeTunnelConfiguration`.
-* IPv6 is captured by the tunnel and routed to a blackhole outbound, so it
-  cannot leak around it.
-* The Xray core ships as a checksum-verified artifact from GitHub releases;
-  `LOCAL_CORE=1` links a locally built one instead.
+* IPv6 is captured by the tunnel so it cannot leak around it, and proxied
+  rather than dropped; names resolve IPv4-only via the Xray config's
+  `queryStrategy`.
+* The tunnel engine lives in
+  [vless-apple](https://github.com/mysteriumnetwork/vless-apple); this package
+  is the control plane only.

@@ -119,13 +119,11 @@ app.*.symbols
 /docs/
 
 # Xray core build artifacts — fetched from GitHub releases, never committed
-/third_party/xray-mobile/build/
 
 # SwiftPM scratch
 /.build/
 
 # Xray binary artifact — built locally or fetched from releases, never committed
-/darwin/vless_dart/Artifacts/
 
 # FVM Version Cache
 .fvm/

@@ -65,9 +65,9 @@ void main() {
     expect(tags, contains('dns-out'));
 
     final rules = (config['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
-    final dnsRule = rules.firstWhere(
-      (dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out',
-    ) as Map<String, dynamic>;
+    final dnsRule =
+        rules.firstWhere((dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out')
+            as Map<String, dynamic>;
     expect(dnsRule['port'], 53);
   });
 
