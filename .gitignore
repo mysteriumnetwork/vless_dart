@@ -118,12 +118,15 @@ app.*.symbols
 # Superpowers specs and plans — kept local, not tracked
 /docs/
 
-# Xray core build artifacts — fetched from GitHub releases, never committed
+# SwiftPM scratch. Unanchored: the package sits at darwin/vless_dart/, so a
+# leading slash would miss its .build/ entirely.
+.build/
 
-# SwiftPM scratch
-/.build/
+# Xcode project backups
+*.pbxproj.bak
 
-# Xray binary artifact — built locally or fetched from releases, never committed
+# JetBrains IDE state
+.idea/
 
 # FVM Version Cache
 .fvm/

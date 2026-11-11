@@ -169,18 +169,54 @@ class VPNUtils {
                 }
                 // saveToPreferences is not fully settled when its completion
                 // fires; starting immediately races it.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    do {
-                        try manager.connection.startVPNTunnel(options: [:])
-                        self.observeStatus()
-                        completion(nil)
-                    } catch {
-                        self.stopVPN()
-                        completion(error)
-                    }
+                self.startTunnel(on: manager, attempt: 0, completion: completion)
+            }
+        }
+    }
+
+    /// Starts the tunnel, reloading preferences and retrying while the save is
+    /// still settling.
+    ///
+    /// Replaces a fixed delay before the first attempt, which was simultaneously
+    /// too long on a warm device — half a second added to every connect — and
+    /// too short on a cold or loaded one, where it surfaced as "Failed to start
+    /// VPN" and a connect the user had to tap twice.
+    private func startTunnel(
+        on manager: NETunnelProviderManager,
+        attempt: Int,
+        completion: @escaping (Error?) -> Void
+    ) {
+        do {
+            try manager.connection.startVPNTunnel(options: [:])
+            observeStatus()
+            completion(nil)
+        } catch {
+            guard attempt + 1 < Self.startAttemptLimit, Self.isUnsettledConfiguration(error) else {
+                stopVPN()
+                completion(error)
+                return
+            }
+            // Best effort: a failed reload still leaves the retry worth taking,
+            // and the start error is the one worth reporting if they run out.
+            manager.loadFromPreferences { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.startRetryDelay) {
+                    self.startTunnel(on: manager, attempt: attempt + 1, completion: completion)
                 }
             }
         }
+    }
+
+    /// Bounded at roughly 0.45 s total, well under the old unconditional 0.5 s.
+    static let startAttemptLimit = 4
+    static let startRetryDelay: TimeInterval = 0.15
+
+    /// The NEVPNError cases that mean the saved configuration has not landed
+    /// yet, as opposed to a configuration that is actually wrong.
+    static func isUnsettledConfiguration(_ error: Error) -> Bool {
+        let error = error as NSError
+        guard error.domain == NEVPNErrorDomain else { return false }
+        return error.code == NEVPNError.configurationInvalid.rawValue
+            || error.code == NEVPNError.configurationStale.rawValue
     }
 
     /// Asks the extension for its byte counters. Hands back nil when the tunnel

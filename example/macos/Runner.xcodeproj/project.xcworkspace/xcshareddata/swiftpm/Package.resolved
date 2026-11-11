@@ -8,6 +8,15 @@
         "revision" : "6cd93d0583db031d576ff1796f832f65f3aee06a",
         "version" : "5.15.0"
       }
+    },
+    {
+      "identity" : "vless-apple",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mysteriumnetwork/vless-apple",
+      "state" : {
+        "revision" : "d38b741de7d950b2b97016b55a71a9e3663a1501",
+        "version" : "1.0.0"
+      }
     }
   ],
   "version" : 2

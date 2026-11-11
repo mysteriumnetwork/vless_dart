@@ -22,15 +22,32 @@ analyze:
 test: init
 	fvm flutter test
 
-# format + analyze + the Dart suite, as CI would run it
-check: format analyze test
+# Swift tests for the plugin's control plane, hosted by the macOS example.
+# They cannot run via `swift test`: the package depends on FlutterFramework,
+# which only exists inside a Flutter build.
+#
+# Flutter hardcodes macOS 10.15 in the package it generates, which Xcode clamps
+# to 12.0 — below this package's floor, so the test action refuses to link our
+# product. Building tolerates the mismatch; only testing fails. That file is
+# ephemeral and gitignored, so raise it in place, reading the floor from
+# Package.swift rather than repeating it.
+FGPSP = example/macos/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
+MACOS_FLOOR = $(shell sed -n 's/.*\.macOS("\([0-9.]*\)").*/\1/p' darwin/vless_dart/Package.swift)
+
+test-swift: init-example
+	@if [ -f $(FGPSP) ]; then \
+	  sed -i '' 's/\.macOS("[0-9.]*")/.macOS("$(MACOS_FLOOR)")/' $(FGPSP); \
+	  echo "==> pinned generated plugin package to macOS $(MACOS_FLOOR)"; \
+	fi
+	cd example/macos && xcodebuild test -workspace Runner.xcworkspace -scheme Runner \
+	  -destination 'platform=macOS,arch=arm64' -allowProvisioningUpdates -quiet
+
+# format + analyze + the Dart and Swift suites, as CI would run it
+check: format analyze test test-swift
 
 # ─── Example app ─────────────────────────────────────────────────────────────────
 run-example: init-example
 	cd example && fvm flutter run
-
-build-example-apk: init-example
-	cd example && fvm flutter build apk --debug
 
 # ─── macOS run ───────────────────────────────────────────────────────────────────
 # `flutter build macos` writes to example/build/macos, but LaunchServices

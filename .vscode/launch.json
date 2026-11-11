@@ -35,7 +35,7 @@
             "cwd": "example",
             "program": "lib/main.dart",
             "flutterMode": "debug",
-            "deviceId": "00008150-001448541E08401C"
+            "deviceId": "ios"
         },
         {
             "name": "iOS-profile",
@@ -44,7 +44,7 @@
             "cwd": "example",
             "program": "lib/main.dart",
             "flutterMode": "profile",
-            "deviceId": "00008150-001448541E08401C"
+            "deviceId": "ios"
         },
         {
             "name": "iOS-release (memory measurement)",
@@ -53,7 +53,7 @@
             "cwd": "example",
             "program": "lib/main.dart",
             "flutterMode": "release",
-            "deviceId": "00008150-001448541E08401C"
+            "deviceId": "ios"
         }
     ]
 }

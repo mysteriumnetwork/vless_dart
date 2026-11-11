@@ -86,7 +86,7 @@ in the same package graph.
 ## Development
 
 ```sh
-make check           # format + analyze + the Dart suite
+make check           # format + analyze + the Dart and Swift suites
 make run-macos       # build, sync to the registered bundle, launch
 make run-macos-auto  # same, connects on launch
 make tunnel-logs     # stream the extension's os_log
@@ -96,6 +96,13 @@ make exit-ip         # confirm traffic leaves through the tunnel
 `run-macos` syncs the build over the bundle LaunchServices has registered.
 Without that step macOS keeps loading a stale copy of the extension, which looks
 exactly like your changes having no effect.
+
+`test-swift` covers the plugin's control plane, hosted by the macOS example
+because the package depends on FlutterFramework and cannot run under
+`swift test`. It raises the macOS floor of the Flutter-generated plugin package
+first: Flutter hardcodes 10.15 there, below this package's floor, and Xcode's
+test action refuses to link against the mismatch even though building tolerates
+it.
 
 ## Licensing
 

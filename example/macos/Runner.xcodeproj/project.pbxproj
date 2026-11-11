@@ -350,7 +350,7 @@
 			mainGroup = 33CC10E42044A3C60003C045;
 			packageReferences = (
 				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */,
-				97BE51EB30A3696200A2A1A9 /* XCLocalSwiftPackageReference "../../darwin/vless_dart" */,
+				97BE51EB30A3696200A2A1A9 /* XCRemoteSwiftPackageReference "vless-apple" */,
 			);
 			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
 			projectDirPath = "";
@@ -968,11 +968,18 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage;
 		};
-		97BE51EB30A3696200A2A1A9 /* XCLocalSwiftPackageReference "../../darwin/vless_dart" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../darwin/vless_dart;
-		};
 /* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		97BE51EB30A3696200A2A1A9 /* XCRemoteSwiftPackageReference "vless-apple" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mysteriumnetwork/vless-apple";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */ = {
@@ -981,6 +988,7 @@
 		};
 		97BE51EC30A3696200A2A1A9 /* vless-tunnel-support */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 97BE51EB30A3696200A2A1A9 /* XCRemoteSwiftPackageReference "vless-apple" */;
 			productName = "vless-tunnel-support";
 		};
 /* End XCSwiftPackageProductDependency section */

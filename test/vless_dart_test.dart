@@ -74,6 +74,22 @@ void main() {
     expect(calls.where((MethodCall c) => c.method == 'connect'), isEmpty);
   });
 
+  test('getVPNStatus normalizes exactly as the stream does', () async {
+    // Both paths share _strToStatus, so a polled read and a streamed one can
+    // never disagree about the same wire value.
+    for (final raw in <String?>[null, '', '   ', 'idle', 'INVALID', ' Invalid ']) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (MethodCall call) async => call.method == 'status' ? raw : null,
+      );
+      expect(
+        await VlessDart().getVPNStatus(),
+        ConnectionStatus.disconnected,
+        reason: 'native status ${raw == null ? 'null' : '"$raw"'} should be disconnected',
+      );
+    }
+  });
+
   test('getVPNStatus maps the native string', () async {
     expect(await VlessDart().getVPNStatus(), ConnectionStatus.connected);
   });

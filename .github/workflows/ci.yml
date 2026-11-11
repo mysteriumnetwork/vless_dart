@@ -1,7 +1,11 @@
 name: CI
 
-# Dart only. The Xray core, the Swift tunnel module and their suites live in
+# Dart only. The Xray core and the tunnel module live in
 # github.com/mysteriumnetwork/vless-apple and are tested there.
+#
+# The plugin's own Swift tests need a signed macOS build — the example that
+# hosts them carries a NetworkExtension entitlement — so they stay local behind
+# `make test-swift` until signing secrets are in place.
 
 on:
   push:

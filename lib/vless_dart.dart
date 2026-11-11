@@ -91,9 +91,12 @@ class VlessDart {
       getVPNStatus().then((ConnectionStatus value) => value == ConnectionStatus.connected);
 
   /// Latest connection status.
+  ///
+  /// Shares [_strToStatus] with [statusStream] so a polled read and a streamed
+  /// one can never disagree about the same wire value.
   Future<ConnectionStatus> getVPNStatus() async {
     final String? status = await _channelControl.invokeMethod('status');
-    return ConnectionStatus.fromString(status ?? 'disconnected');
+    return _strToStatus(status);
   }
 
   /// Cumulative traffic statistics for the current session.

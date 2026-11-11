@@ -167,9 +167,17 @@ class _HomePageState extends State<_HomePage> {
     }
   }
 
-  void _disconnect() {
-    _vpn.disconnect();
-    setState(() => _stats = null);
+  Future<void> _disconnect() async {
+    // Awaited, via the same reporter as every other call: dropping the future
+    // turns a platform failure into an unhandled async error and leaves the UI
+    // claiming a tunnel that is still up.
+    await _run('Disconnect', () async {
+      await _vpn.disconnect();
+      return null;
+    });
+    if (mounted) {
+      setState(() => _stats = null);
+    }
   }
 
   /// Runs an action and reports its outcome, so every call is visible.

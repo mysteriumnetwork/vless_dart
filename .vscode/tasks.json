@@ -2,22 +2,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build Xray core (iOS + macOS)",
-            "type": "shell",
-            "command": "./scripts/build_xray_apple.sh",
-            "problemMatcher": []
-        },
-        {
             "label": "Test: Dart",
             "type": "shell",
             "command": "fvm flutter test",
-            "group": "test",
-            "problemMatcher": []
-        },
-        {
-            "label": "Test: Go (xray-mobile)",
-            "type": "shell",
-            "command": "cd third_party/xray-mobile && go test ./...",
             "group": "test",
             "problemMatcher": []
         },
