@@ -1,12 +1,36 @@
 // swift-tools-version: 5.9
 
+import Foundation
 import PackageDescription
+
+// Trimmed Xray core — VLESS over WebSocket + TLS only, built by
+// scripts/build_xray_apple.sh. See docs/superpowers/specs §6 and §11.
+//
+// The published release is the default, so a clone needs no Go toolchain. Set
+// VLESS_LOCAL_CORE=1 (or `make <target> LOCAL_CORE=1`) to link a local build
+// instead — required when changing third_party/xray-mobile. SwiftPM keys its
+// manifest cache on the environment, so toggling it does re-evaluate; checking
+// for the artifact on disk instead would be served stale from that cache.
+//
+// The local path MUST stay inside the package: Flutter symlinks the package
+// into example/ios/Flutter/ephemeral/Packages/, so a path escaping the package
+// root resolves against that location instead.
+let xrayCore: Target
+if ProcessInfo.processInfo.environment["VLESS_LOCAL_CORE"] == "1" {
+  xrayCore = .binaryTarget(name: "XRay", path: "Artifacts/XRay.xcframework")
+} else {
+  xrayCore = .binaryTarget(
+    name: "XRay",
+    url: "https://github.com/mysteriumnetwork/vless_dart/releases/download/xray-v26.3.27/XRay.xcframework.zip",
+    checksum: "2f2046387f75a141b166594a8f9e1e0ac4437d7fa2946eb2112dd14e8141e815"
+  )
+}
 
 let package = Package(
   name: "vless_dart",
   platforms: [
     .iOS("15.0"),
-    .macOS("12.0")
+    .macOS("13.0")
   ],
   products: [
     // For the app target: the Flutter plugin (control plane).
@@ -37,23 +61,6 @@ let package = Package(
       // Go's net package resolves via libresolv (_res_9_ninit et al).
       linkerSettings: [.linkedLibrary("resolv")]
     ),
-    // Trimmed Xray core — VLESS over WebSocket + TLS only. Built by
-    // scripts/build_xray_apple.sh; see docs/superpowers/specs §6 and §11.
-    //
-    // Local path while we iterate. Switch to the remote form once the artifact
-    // is published to GitHub releases:
-    //
-    //   .binaryTarget(
-    //     name: "XRay",
-    //     url: "https://github.com/mysteriumnetwork/vless_dart/releases/download/xray-<ver>/XRay.xcframework.zip",
-    //     checksum: "8c5f1b2f0d8b2437ccb4bea26cc418ae4b9fecfea1df6197ddca126c7f5e8965"
-    //   )
-    // Path MUST stay inside the package: Flutter symlinks the package into
-    // example/ios/Flutter/ephemeral/Packages/, and a path escaping the package
-    // root resolves against that location instead.
-    .binaryTarget(
-      name: "XRay",
-      path: "Artifacts/XRay.xcframework"
-    )
+    xrayCore
   ]
 )

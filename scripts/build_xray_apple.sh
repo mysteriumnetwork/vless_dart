@@ -16,6 +16,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODULE="$ROOT/third_party/xray-mobile"
 OUT="$ROOT/darwin/vless_dart/Artifacts"
 IOS_VERSION="${IOS_VERSION:-15.0}"
+# Must match Package.swift and the host app. Without it gomobile defaults to
+# the host SDK, which stamps objects with a far newer minimum than we claim.
+MACOS_VERSION="${MACOS_VERSION:-13.0}"
 
 export PATH="/opt/homebrew/bin:$PATH"
 export PATH="$PATH:$(go env GOPATH)/bin"
@@ -50,7 +53,7 @@ gomobile bind -a -ldflags="-s -w" -target=ios -iosversion="$IOS_VERSION" \
   -o "$WORK/ios/XRay.xcframework" .
 
 echo "==> building macOS"
-gomobile bind -a -ldflags="-s -w" -target=macos \
+gomobile bind -a -ldflags="-s -w" -target=macos -macosversion="$MACOS_VERSION" \
   -o "$WORK/mac/XRay.xcframework" .
 
 echo "==> merging slices"
