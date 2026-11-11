@@ -6,6 +6,11 @@ import PackageDescription
 // Trimmed Xray core — VLESS over WebSocket + TLS only, built by
 // scripts/build_xray_apple.sh. See docs/superpowers/specs §6 and §11.
 //
+// Shipped as a -library xcframework, not a -framework one. Xcode embeds a
+// binary target delivered as a .framework into the app bundle even when it
+// wraps a static archive, then fails to codesign it and the iOS install dies
+// with 0xe8008014. A library is linked and never embedded.
+//
 // The published release is the default, so a clone needs no Go toolchain. Set
 // VLESS_LOCAL_CORE=1 (or `make <target> LOCAL_CORE=1`) to link a local build
 // instead — required when changing third_party/xray-mobile. SwiftPM keys its
@@ -21,8 +26,8 @@ if ProcessInfo.processInfo.environment["VLESS_LOCAL_CORE"] == "1" {
 } else {
   xrayCore = .binaryTarget(
     name: "XRay",
-    url: "https://github.com/mysteriumnetwork/vless_dart/releases/download/xray-v26.3.27-2/XRay.xcframework.zip",
-    checksum: "e44f8ab79cbff73d21b9349f03d855a6b0978ae20e1989453d0a2bf389deb04f"
+    url: "https://github.com/mysteriumnetwork/vless_dart/releases/download/xray-v26.3.27-3/XRay.xcframework.zip",
+    checksum: "9c647f8f4aeadcc32f008a55a8fe4b7ac48e8265718c5849151aff727e9c17ac"
   )
 }
 
