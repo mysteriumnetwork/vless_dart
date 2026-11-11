@@ -52,6 +52,19 @@ void main() {
     expect(settings['udp'], true);
   });
 
+  test('captures IPv6 and routes it to the blackhole', () {
+    final config = _build();
+    final rules = (config['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
+    final rule = rules.first as Map<String, dynamic>;
+    expect(rule['ip'], <String>['::/0']);
+    expect(rule['outboundTag'], 'block');
+
+    // routeOnly keeps the IP matcher looking at the real target, so an IPv6
+    // literal cannot slip past the rule via a sniffed domain.
+    final inbound = (config['inbounds']! as List<dynamic>).first as Map<String, dynamic>;
+    expect((inbound['sniffing']! as Map<String, dynamic>)['routeOnly'], true);
+  });
+
   test('includes direct and block outbounds', () {
     final tags = (_build()['outbounds']! as List<dynamic>)
         .map((dynamic o) => (o as Map<String, dynamic>)['tag'])

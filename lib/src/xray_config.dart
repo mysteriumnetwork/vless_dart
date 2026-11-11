@@ -22,6 +22,9 @@ abstract final class XrayConfig {
         'sniffing': <String, dynamic>{
           'enabled': true,
           'destOverride': <dynamic>['http', 'tls'],
+          // Without routeOnly the sniffed domain replaces the target, and an
+          // IPv6 literal would slip past the ::/0 routing rule below.
+          'routeOnly': true,
         },
       },
     ],
@@ -51,5 +54,17 @@ abstract final class XrayConfig {
       <String, dynamic>{'tag': 'direct', 'protocol': 'freedom'},
       <String, dynamic>{'tag': 'block', 'protocol': 'blackhole'},
     ],
+    // The tunnel captures IPv6 so it cannot leak around us, then drops it here
+    // so clients fall back to IPv4. Omitting NEIPv6Settings would not disable
+    // the device's physical IPv6 — it would just route it outside the tunnel.
+    'routing': <String, dynamic>{
+      'rules': <dynamic>[
+        <String, dynamic>{
+          'type': 'field',
+          'ip': <dynamic>['::/0'],
+          'outboundTag': 'block',
+        },
+      ],
+    },
   };
 }

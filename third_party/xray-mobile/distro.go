@@ -25,6 +25,10 @@ import (
 	_ "github.com/xtls/xray-core/app/policy"
 	_ "github.com/xtls/xray-core/app/stats"
 
+	// Routing, so IPv6 can be null-routed inside the tunnel instead of leaking
+	// around it. Free: infra/conf already pulls this into the closure.
+	_ "github.com/xtls/xray-core/app/router"
+
 	// Inbound: the loopback SOCKS the tun2socks bridge talks to.
 	_ "github.com/xtls/xray-core/proxy/socks"
 

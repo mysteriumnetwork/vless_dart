@@ -1,29 +1,30 @@
-import Flutter
-import UIKit
 import XCTest
 
-// If your plugin has been explicitly set to "type: .dynamic" in the Package.swift,
-// you will need to add your plugin as a dependency of RunnerTests within Xcode.
+@testable import vless_tunnel_support
 
-@testable import vless_dart
+/// The tunnel-support module is shared between iOS and macOS. The full suite
+/// lives in the macOS example, which can run it on a Mac; this mirrors the
+/// cases that are cheap to run on a device.
+final class TunnelSupportTests: XCTestCase {
 
-// This demonstrates a simple unit test of the Swift portion of this plugin's implementation.
-//
-// See https://developer.apple.com/documentation/xctest for more information about using XCTest.
+    func testPreparerFillsPortAndCredentials() throws {
+        let config = """
+        {
+          "inbounds": [{"protocol": "socks", "port": 0,
+                        "settings": {"auth": "password", "accounts": []}}],
+          "outbounds": [{"tag": "proxy", "protocol": "vless",
+                         "settings": {"vnext": [{"address": "example.com", "port": 443}]}}]
+        }
+        """
+        let prepared = try TunnelXrayConfigPreparer.prepare(Data(config.utf8))
 
-class RunnerTests: XCTestCase {
-
-  func testGetPlatformVersion() {
-    let plugin = VlessDartPlugin()
-
-    let call = FlutterMethodCall(methodName: "getPlatformVersion", arguments: [])
-
-    let resultExpectation = expectation(description: "result block must be called.")
-    plugin.handle(call) { result in
-      XCTAssertEqual(result as! String, "iOS " + UIDevice.current.systemVersion)
-      resultExpectation.fulfill()
+        XCTAssertGreaterThan(prepared.socksPort, 0)
+        XCTAssertEqual(prepared.serverAddress, "example.com")
+        XCTAssertFalse(prepared.credentials.username.isEmpty)
     }
-    waitForExpectations(timeout: 1)
-  }
 
+    func testCredentialsAreRedactedInDescription() throws {
+        let credentials = try ProxyCredentials.random()
+        XCTAssertFalse("\(credentials)".contains(credentials.password))
+    }
 }

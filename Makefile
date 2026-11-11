@@ -21,8 +21,18 @@ analyze:
 test: init
 	fvm flutter test
 
-# format check + analyze + test, as CI would run it
-check: format analyze test
+# Swift unit tests for the tunnel-support module, via the macOS example.
+# `swift test` cannot resolve the package standalone: FlutterFramework is a path
+# dependency that only exists inside a Flutter build.
+test-swift:
+	cd example/macos && xcodebuild test -workspace Runner.xcworkspace -scheme Runner \
+	  -destination 'platform=macOS,arch=arm64' -allowProvisioningUpdates -quiet
+
+test-go:
+	cd third_party/xray-mobile && go test ./...
+
+# format check + analyze + every suite, as CI would run it
+check: format analyze test test-go test-swift
 
 # ─── Example app ─────────────────────────────────────────────────────────────────
 run-example: init-example

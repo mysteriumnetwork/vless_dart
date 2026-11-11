@@ -4,10 +4,10 @@ import Foundation
 public struct PreparedTunnelConfig {
     public let config: Data
     public let socksPort: Int
-    public let credentials: LocalProxyCredentials
+    public let credentials: ProxyCredentials
     public let serverAddress: String
 
-    public init(config: Data, socksPort: Int, credentials: LocalProxyCredentials,
+    public init(config: Data, socksPort: Int, credentials: ProxyCredentials,
                 serverAddress: String)
     {
         self.config = config
@@ -17,7 +17,7 @@ public struct PreparedTunnelConfig {
     }
 }
 
-public enum TunnelConfigError: Error {
+public enum TunnelConfigError: Error, Equatable {
     case malformedConfig
     case noSocksInbound
     case noProxyOutbound
@@ -38,7 +38,7 @@ public enum TunnelXrayConfigPreparer {
         }
 
         let port = try freeLoopbackPort()
-        let credentials = try LocalProxyCredentials.generate()
+        let credentials = try ProxyCredentials.random()
 
         guard var inbounds = root["inbounds"] as? [[String: Any]],
               let index = inbounds.firstIndex(where: { $0["protocol"] as? String == "socks" })

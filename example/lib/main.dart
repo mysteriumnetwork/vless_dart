@@ -9,7 +9,7 @@ import 'package:vless_dart/vpn_status.dart';
 
 /// Paste a `vless://` URI from the API here, or edit it in the field.
 const _defaultUri =
-    'vless://b4cadb0d-886b-47ff-9edb-1f2d01612c28@supervpn-dc-testnet-01.mysterium.network:443'
+    'vless://9d08cc5e-e71d-4ab0-9436-d0043578ca64@supervpn-dc-testnet-01.mysterium.network:443'
     '?encryption=none&host=supervpn-dc-testnet-01.mysterium.network&path=%2Fvless'
     '&security=tls&sni=supervpn-dc-testnet-01.mysterium.network&type=ws#Mysterium%20VLESS';
 

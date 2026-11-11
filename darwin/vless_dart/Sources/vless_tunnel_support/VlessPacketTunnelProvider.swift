@@ -1,9 +1,6 @@
 //
 //  Shared packet tunnel provider for iOS and macOS.
 //
-//  Structure follows flutter_vless's provider (MIT, 13FOX Studio); the Xray and
-//  hev wiring below is adapted from it. See docs/superpowers/specs §16.
-//
 //  Each platform's extension target subclasses this, so the data plane lives in
 //  one place rather than being copied per platform.
 //
@@ -16,6 +13,8 @@ import os
 
 private let tunnelMTU = 1500
 private let tunnelAddress = "198.18.0.1"
+// ULA, so capturing IPv6 cannot collide with a real prefix on the network.
+private let tunnelAddressIPv6 = "fd00:198:18::1"
 private let hevStartupGrace: TimeInterval = 0.25
 private let hevShutdownTimeout: TimeInterval = 2
 
@@ -25,7 +24,7 @@ private let log = OSLog(
 )
 
 open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
-    private let hev = TunnelProcessLifecycle()
+    private let hev = TunnelWorkerLifecycle()
     private let runtimeQueue = DispatchQueue(label: "com.mysteriumvpn.vless.runtime")
     private var hevLogURL: URL?
     private var started = false
@@ -138,11 +137,11 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
             .appendingPathComponent("hev-socks5-tunnel.log")
         hevLogURL = logURL
 
-        let hevConfig = TunnelHEVConfiguration.make(
-            port: prepared.socksPort,
+        let hevConfig = TunnelBridgeConfiguration.yaml(
+            socksPort: prepared.socksPort,
             credentials: prepared.credentials,
             mtu: tunnelMTU,
-            logURL: logURL
+            logPath: logURL.path
         )
 
         hev.beginStart()
@@ -227,7 +226,8 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
     ) {
         // tunnelRemoteAddress must be an IP literal; a hostname is rejected with
         // NETunnelProviderErrorDomain Code=1.
-        let addresses = resolveAll(serverAddress)
+        let addresses = resolveAll(serverAddress, family: AF_INET)
+        let addresses6 = resolveAll(serverAddress, family: AF_INET6)
         guard let resolved = addresses.first else {
             os_log("[TUNNEL] cannot resolve %@", log: log, type: .error, serverAddress)
             completion(TunnelConfigError.unresolvableServer)
@@ -249,6 +249,18 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
         }
         settings.ipv4Settings = ipv4
 
+        // Capture IPv6 as well. Leaving ipv6Settings nil does not disable the
+        // device's physical IPv6 — it routes it outside the tunnel, which on a
+        // dual-stack network leaks the user's real address for everything that
+        // prefers IPv6. Captured traffic is dropped by the ::/0 routing rule in
+        // the Xray config, so clients fall back to IPv4.
+        let ipv6 = NEIPv6Settings(addresses: [tunnelAddressIPv6], networkPrefixLengths: [64])
+        ipv6.includedRoutes = [NEIPv6Route.default()]
+        ipv6.excludedRoutes = addresses6.map {
+            NEIPv6Route(destinationAddress: $0, networkPrefixLength: 128)
+        }
+        settings.ipv6Settings = ipv6
+
         // Public resolvers reached through the tunnel. A virtual DNS server
         // would need Xray's DNS app, which the trimmed distro leaves out.
         let dns = NEDNSSettings(servers: ["1.1.1.1", "1.0.0.1"])
@@ -258,9 +270,10 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
         setTunnelNetworkSettings(settings, completionHandler: completion)
     }
 
-    /// Every IPv4 address the host resolves to, so all of them can be excluded.
-    private func resolveAll(_ host: String) -> [String] {
-        var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM,
+    /// Every address the host resolves to in [family], so all of them can be
+    /// excluded from the tunnel.
+    private func resolveAll(_ host: String, family: Int32) -> [String] {
+        var hints = addrinfo(ai_flags: 0, ai_family: family, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil,
                              ai_addr: nil, ai_next: nil)
         var info: UnsafeMutablePointer<addrinfo>?
@@ -271,9 +284,24 @@ open class VlessPacketTunnelProvider: NEPacketTunnelProvider {
         var node = info
         while let current = node {
             if let addr = current.pointee.ai_addr {
-                var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                if inet_ntop(AF_INET, &sin.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                let printed: Bool
+                if family == AF_INET6 {
+                    var sin6 = addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+                        $0.pointee
+                    }
+                    printed = inet_ntop(
+                        AF_INET6, &sin6.sin6_addr, &buffer, socklen_t(INET6_ADDRSTRLEN)
+                    ) != nil
+                } else {
+                    var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                        $0.pointee
+                    }
+                    printed = inet_ntop(
+                        AF_INET, &sin.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)
+                    ) != nil
+                }
+                if printed {
                     let text = String(cString: buffer)
                     if !out.contains(text) {
                         out.append(text)
