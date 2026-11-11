@@ -1,13 +1,19 @@
 import Foundation
 import NetworkExtension
 import os
-import vless_tunnel_support
 
 #if os(iOS)
     import Flutter
 #elseif os(macOS)
     import FlutterMacOS
 #endif
+
+/// Mirrors `TunnelProviderMessages.stats` in vless_tunnel_support.
+///
+/// Deliberately duplicated rather than imported: the plugin runs in the app
+/// process, and importing the support module would pull the Xray core — and a
+/// second Go runtime — in alongside WireGuard's, which fails to link.
+private let vlessStatsProviderMessage = "VLESS_STATS"
 
 /// Owns the `NETunnelProviderManager` lifecycle.
 ///

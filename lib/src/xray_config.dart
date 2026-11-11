@@ -6,65 +6,87 @@ import 'package:vless_dart/src/vless_uri.dart';
 /// picks a free loopback port and mints per-session credentials at startup, so
 /// nothing else on the device can use the proxy.
 abstract final class XrayConfig {
-  static Map<String, dynamic> build(VlessUri uri) => <String, dynamic>{
-    'log': <String, dynamic>{'loglevel': 'warning'},
-    'stats': <String, dynamic>{},
-    'policy': <String, dynamic>{
-      'system': <String, dynamic>{'statsOutboundUplink': true, 'statsOutboundDownlink': true},
-    },
-    'inbounds': <dynamic>[
+  /// Resolve names to IPv4 only.
+  ///
+  /// The exits have no IPv6 egress, and tun2socks cannot fail an IPv6
+  /// connection in a way a browser recovers from: hev completes the local TCP
+  /// handshake before Xray learns the destination is unreachable, so the client
+  /// sees "connected, then closed" rather than a failed connect and does not
+  /// fall back to IPv4. Never offering an AAAA keeps clients off that path.
+  ///
+  /// Switch to `UseIP` once the exits carry IPv6.
+  static const ipv4Only = 'UseIPv4';
+
+  static Map<String, dynamic> build(VlessUri uri, {String queryStrategy = ipv4Only}) =>
       <String, dynamic>{
-        'tag': 'socks-in',
-        'protocol': 'socks',
-        'listen': '127.0.0.1',
-        'port': 0,
-        'settings': <String, dynamic>{'auth': 'password', 'accounts': <dynamic>[], 'udp': true},
-        'sniffing': <String, dynamic>{
-          'enabled': true,
-          'destOverride': <dynamic>['http', 'tls'],
-          // Without routeOnly the sniffed domain replaces the target, and an
-          // IPv6 literal would slip past the ::/0 routing rule below.
-          'routeOnly': true,
+        'log': <String, dynamic>{'loglevel': 'warning'},
+        // Answers DNS inside the tunnel so [queryStrategy] applies. Without this
+        // the query goes straight to the resolver and AAAA comes back regardless.
+        'dns': <String, dynamic>{
+          'servers': <dynamic>['1.1.1.1', '1.0.0.1'],
+          'queryStrategy': queryStrategy,
         },
-      },
-    ],
-    'outbounds': <dynamic>[
-      <String, dynamic>{
-        'tag': 'proxy',
-        'protocol': 'vless',
-        'settings': <String, dynamic>{
-          'vnext': <dynamic>[
-            <String, dynamic>{
-              'address': uri.address,
-              'port': uri.port,
-              'users': <dynamic>[
-                <String, dynamic>{'id': uri.id, 'encryption': 'none', 'level': 0},
+        'stats': <String, dynamic>{},
+        'policy': <String, dynamic>{
+          'system': <String, dynamic>{'statsOutboundUplink': true, 'statsOutboundDownlink': true},
+        },
+        'inbounds': <dynamic>[
+          <String, dynamic>{
+            'tag': 'socks-in',
+            'protocol': 'socks',
+            'listen': '127.0.0.1',
+            'port': 0,
+            'settings': <String, dynamic>{'auth': 'password', 'accounts': <dynamic>[], 'udp': true},
+            'sniffing': <String, dynamic>{
+              'enabled': true,
+              'destOverride': <dynamic>['http', 'tls'],
+              // Without routeOnly the sniffed domain replaces the target, which
+              // loses the address the client actually asked for.
+              'routeOnly': true,
+            },
+          },
+        ],
+        'outbounds': <dynamic>[
+          <String, dynamic>{
+            'tag': 'proxy',
+            'protocol': 'vless',
+            'settings': <String, dynamic>{
+              'vnext': <dynamic>[
+                <String, dynamic>{
+                  'address': uri.address,
+                  'port': uri.port,
+                  'users': <dynamic>[
+                    <String, dynamic>{'id': uri.id, 'encryption': 'none', 'level': 0},
+                  ],
+                },
               ],
             },
+            'streamSettings': <String, dynamic>{
+              'network': 'ws',
+              'security': 'tls',
+              'tlsSettings': <String, dynamic>{'serverName': uri.sni, 'allowInsecure': false},
+              // `headers.Host` is deprecated upstream in favour of a top-level `host`.
+              'wsSettings': <String, dynamic>{'path': uri.wsPath, 'host': uri.wsHost},
+            },
+          },
+          <String, dynamic>{'tag': 'direct', 'protocol': 'freedom'},
+          <String, dynamic>{'tag': 'block', 'protocol': 'blackhole'},
+          // Hands DNS to Xray's resolver, which honours queryStrategy. Its default
+          // nonIPQuery: 'drop' also drops HTTPS/SVCB records, whose ipv6hint would
+          // otherwise put clients back on IPv6.
+          <String, dynamic>{'tag': 'dns-out', 'protocol': 'dns'},
+        ],
+        // IPv6 goes through the proxy, not a blackhole. Blackholing it looked
+        // safe but is not: hev completes the local TCP handshake before asking
+        // Xray where to route, so a dropped connection reaches the client as
+        // "connected, then closed" rather than "failed". Chrome treats that as a
+        // server fault and never falls back to IPv4, which breaks every
+        // dual-stack site on a cold socket pool.
+        'routing': <String, dynamic>{
+          'rules': <dynamic>[
+            // Everything else, IPv6 included, falls through to 'proxy'.
+            <String, dynamic>{'type': 'field', 'port': 53, 'outboundTag': 'dns-out'},
           ],
         },
-        'streamSettings': <String, dynamic>{
-          'network': 'ws',
-          'security': 'tls',
-          'tlsSettings': <String, dynamic>{'serverName': uri.sni, 'allowInsecure': false},
-          // `headers.Host` is deprecated upstream in favour of a top-level `host`.
-          'wsSettings': <String, dynamic>{'path': uri.wsPath, 'host': uri.wsHost},
-        },
-      },
-      <String, dynamic>{'tag': 'direct', 'protocol': 'freedom'},
-      <String, dynamic>{'tag': 'block', 'protocol': 'blackhole'},
-    ],
-    // The tunnel captures IPv6 so it cannot leak around us, then drops it here
-    // so clients fall back to IPv4. Omitting NEIPv6Settings would not disable
-    // the device's physical IPv6 — it would just route it outside the tunnel.
-    'routing': <String, dynamic>{
-      'rules': <dynamic>[
-        <String, dynamic>{
-          'type': 'field',
-          'ip': <dynamic>['::/0'],
-          'outboundTag': 'block',
-        },
-      ],
-    },
-  };
+      };
 }

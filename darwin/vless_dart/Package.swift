@@ -44,11 +44,13 @@ let package = Package(
     .package(url: "https://github.com/EbrahimTahernejad/Tun2SocksKit", exact: "5.15.0")
   ],
   targets: [
+    // Control plane only. It must NOT depend on vless_tunnel_support: that
+    // would link the Xray core into the app process, and its Go runtime
+    // collides with WireGuard's (duplicate _crosscall2 et al).
     .target(
       name: "vless_dart",
       dependencies: [
-        .product(name: "FlutterFramework", package: "FlutterFramework"),
-        "vless_tunnel_support"
+        .product(name: "FlutterFramework", package: "FlutterFramework")
       ]
     ),
     .target(

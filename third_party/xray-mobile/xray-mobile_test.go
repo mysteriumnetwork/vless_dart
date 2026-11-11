@@ -8,36 +8,103 @@ import (
 // The exact shape lib/src/xray_config.dart emits, with the placeholder port and
 // credentials the tunnel provider fills at startup.
 const dartConfig = `{
-  "log": {"loglevel": "warning"},
+  "log": {
+    "loglevel": "warning"
+  },
+  "dns": {
+    "servers": [
+      "1.1.1.1",
+      "1.0.0.1"
+    ],
+    "queryStrategy": "UseIPv4"
+  },
   "stats": {},
-  "policy": {"system": {"statsOutboundUplink": true, "statsOutboundDownlink": true}},
-  "inbounds": [{
-    "tag": "socks-in",
-    "protocol": "socks",
-    "listen": "127.0.0.1",
-    "port": 10808,
-    "settings": {"auth": "password", "accounts": [{"user": "u", "pass": "p"}], "udp": true},
-    "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
-  }],
+  "policy": {
+    "system": {
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "protocol": "socks",
+      "listen": "127.0.0.1",
+      "port": 10815,
+      "settings": {
+        "auth": "password",
+        "accounts": [
+          {
+            "user": "u",
+            "pass": "p"
+          }
+        ],
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ],
+        "routeOnly": true
+      }
+    }
+  ],
   "outbounds": [
     {
       "tag": "proxy",
       "protocol": "vless",
-      "settings": {"vnext": [{
-        "address": "supervpn-testnet-01.mysterium.network",
-        "port": 443,
-        "users": [{"id": "f7422437-7044-4599-8165-5f7ae7311fc4", "encryption": "none", "level": 0}]
-      }]},
+      "settings": {
+        "vnext": [
+          {
+            "address": "supervpn-testnet-01.mysterium.network",
+            "port": 443,
+            "users": [
+              {
+                "id": "f7422437-7044-4599-8165-5f7ae7311fc4",
+                "encryption": "none",
+                "level": 0
+              }
+            ]
+          }
+        ]
+      },
       "streamSettings": {
         "network": "ws",
         "security": "tls",
-        "tlsSettings": {"serverName": "supervpn-testnet-01.mysterium.network", "allowInsecure": false},
-        "wsSettings": {"path": "/vless", "host": "supervpn-testnet-01.mysterium.network"}
+        "tlsSettings": {
+          "serverName": "supervpn-testnet-01.mysterium.network",
+          "allowInsecure": false
+        },
+        "wsSettings": {
+          "path": "/vless",
+          "host": "supervpn-testnet-01.mysterium.network"
+        }
       }
     },
-    {"tag": "direct", "protocol": "freedom"},
-    {"tag": "block", "protocol": "blackhole"}
-  ]
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    },
+    {
+      "tag": "dns-out",
+      "protocol": "dns"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "port": 53,
+        "outboundTag": "dns-out"
+      }
+    ]
+  }
 }`
 
 // The trimmed distro must register every feature the Dart layer can emit.
@@ -94,5 +161,25 @@ func TestRefusesConcurrentStart(t *testing.T) {
 func TestGetVersionIsNotEmpty(t *testing.T) {
 	if GetVersion() == "" {
 		t.Fatal("expected a version string")
+	}
+}
+
+// The DNS app, the dns outbound and the port-53 rule must survive any future
+// trim of distro.go: without them AAAA records reach the client, and an IPv6
+// connection through tun2socks fails in a way browsers cannot recover from.
+func TestEmittedConfigResolvesIPv4Only(t *testing.T) {
+	for _, want := range []string{`"queryStrategy": "UseIPv4"`, `"protocol": "dns"`, `"port": 53`} {
+		if !strings.Contains(dartConfig, want) {
+			t.Fatalf("config no longer contains %s", want)
+		}
+	}
+
+	if err := Start([]byte(dartConfig)); err != nil {
+		t.Fatalf("xray refused the config Dart emits: %v", err)
+	}
+	defer Stop()
+
+	if !IsRunning() {
+		t.Fatal("xray reported not running after a successful start")
 	}
 }

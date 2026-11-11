@@ -52,23 +52,57 @@ void main() {
     expect(settings['udp'], true);
   });
 
-  test('captures IPv6 and routes it to the blackhole', () {
+  test('resolves IPv4 only, so clients never attempt IPv6', () {
+    final config = _build();
+    final dns = config['dns']! as Map<String, dynamic>;
+    expect(dns['queryStrategy'], 'UseIPv4');
+
+    // The strategy only applies if DNS is answered inside the tunnel, which
+    // needs both the dns outbound and the rule that routes port 53 to it.
+    final tags = (config['outbounds']! as List<dynamic>)
+        .map((dynamic o) => (o as Map<String, dynamic>)['tag'])
+        .toList();
+    expect(tags, contains('dns-out'));
+
+    final rules = (config['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
+    final dnsRule = rules.firstWhere(
+      (dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out',
+    ) as Map<String, dynamic>;
+    expect(dnsRule['port'], 53);
+  });
+
+  test('the query strategy can be relaxed once the exits carry IPv6', () {
+    final uri = VlessUri.parse(testnetUri);
+    final config = XrayConfig.build(uri, queryStrategy: 'UseIP');
+    expect((config['dns']! as Map<String, dynamic>)['queryStrategy'], 'UseIP');
+  });
+
+  test('sends IPv6 through the proxy rather than dropping it', () {
     final config = _build();
     final rules = (config['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
-    final rule = rules.first as Map<String, dynamic>;
-    expect(rule['ip'], <String>['::/0']);
-    expect(rule['outboundTag'], 'block');
 
-    // routeOnly keeps the IP matcher looking at the real target, so an IPv6
-    // literal cannot slip past the rule via a sniffed domain.
+    // A ::/0 -> block rule looks safe but breaks dual-stack clients: hev
+    // completes the local TCP handshake before Xray routes, so a dropped
+    // connection arrives as "connected, then closed". Chrome does not fall
+    // back to IPv4 from that, so every cold dual-stack connection fails.
+    expect(
+      rules.where((dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'block'),
+      isEmpty,
+    );
+  });
+
+  test('keeps routeOnly so the sniffed domain never replaces the target', () {
+    final config = _build();
     final inbound = (config['inbounds']! as List<dynamic>).first as Map<String, dynamic>;
     expect((inbound['sniffing']! as Map<String, dynamic>)['routeOnly'], true);
   });
 
-  test('includes direct and block outbounds', () {
+  test('includes the direct, block and dns outbounds', () {
     final tags = (_build()['outbounds']! as List<dynamic>)
         .map((dynamic o) => (o as Map<String, dynamic>)['tag'])
         .toList();
-    expect(tags, <String>['proxy', 'direct', 'block']);
+    // 'proxy' must stay first: Xray sends unmatched traffic to the first
+    // outbound, which is what carries everything without a routing rule.
+    expect(tags, <String>['proxy', 'direct', 'block', 'dns-out']);
   });
 }
