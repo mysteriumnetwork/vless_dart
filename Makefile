@@ -47,7 +47,18 @@ test: init
 # Swift unit tests for the tunnel-support module, via the macOS example.
 # `swift test` cannot resolve the package standalone: FlutterFramework is a path
 # dependency that only exists inside a Flutter build.
-test-swift:
+# The Flutter-generated plugin package declares macOS 10.15, which Xcode clamps
+# to 12.0 — below this package's floor, so the test action refuses to link our
+# product. Building tolerates it; only testing fails. That file is ephemeral and
+# gitignored, so raise it in place, reading the floor from Package.swift.
+FGPSP = example/macos/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
+MACOS_FLOOR = $(shell sed -n 's/.*\.macOS("\([0-9.]*\)").*/\1/p' darwin/vless_dart/Package.swift)
+
+test-swift: init-example
+	@if [ -f $(FGPSP) ]; then \
+	  sed -i '' 's/\.macOS("[0-9.]*")/.macOS("$(MACOS_FLOOR)")/' $(FGPSP); \
+	  echo "==> pinned generated plugin package to macOS $(MACOS_FLOOR)"; \
+	fi
 	cd example/macos && xcodebuild test -workspace Runner.xcworkspace -scheme Runner \
 	  -destination 'platform=macOS,arch=arm64' -allowProvisioningUpdates -quiet
 

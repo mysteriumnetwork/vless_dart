@@ -2,8 +2,8 @@
 #
 # Builds the trimmed Xray core as XRay.xcframework for iOS and macOS.
 #
-# Output goes to darwin/vless_dart/Artifacts/, which is where Package.swift
-# expects it. The path must stay inside the SwiftPM package: Flutter symlinks
+# Output goes to darwin/vless_dart/Artifacts/, which Package.swift links only
+# under VLESS_LOCAL_CORE=1; otherwise it fetches a published release. The path must stay inside the SwiftPM package: Flutter symlinks
 # the package into example/ios/Flutter/ephemeral/Packages/, so a binaryTarget
 # path that escapes the package root resolves against that location instead.
 #
@@ -63,6 +63,35 @@ xcodebuild -create-xcframework \
   -framework "$WORK/ios/XRay.xcframework/ios-arm64_x86_64-simulator/XRay.framework" \
   -framework "$WORK/mac/XRay.xcframework/macos-arm64_x86_64/XRay.framework" \
   -output "$OUT/XRay.xcframework" >/dev/null
+
+echo
+echo "==> verifying deployment targets"
+# A slice stamped with the wrong minimum links with only a warning and ships a
+# core that does not honour the floor Package.swift claims. Fail the build.
+verify_slice() {
+  local bin="$1" arch="$2" want="$3" got slice
+  slice="$(basename "$(dirname "$(dirname "$bin")")")"
+  got="$(otool -arch "$arch" -l "$bin" | grep -A4 LC_BUILD_VERSION \
+         | awk '/minos/{print $2}' | sort -u | tr '\n' ' ')"
+  got="${got% }"
+  if [ "$got" != "$want" ]; then
+    echo "   FAIL $slice ($arch): minos '$got', expected '$want'" >&2
+    return 1
+  fi
+  echo "   ok   $slice ($arch): minos $got"
+}
+
+XC="$OUT/XRay.xcframework"
+rc=0
+verify_slice "$XC/macos-arm64_x86_64/XRay.framework/XRay" arm64  "$MACOS_VERSION" || rc=1
+verify_slice "$XC/macos-arm64_x86_64/XRay.framework/XRay" x86_64 "$MACOS_VERSION" || rc=1
+verify_slice "$XC/ios-arm64/XRay.framework/XRay" arm64 "$IOS_VERSION" || rc=1
+verify_slice "$XC/ios-arm64_x86_64-simulator/XRay.framework/XRay" arm64  "$IOS_VERSION" || rc=1
+verify_slice "$XC/ios-arm64_x86_64-simulator/XRay.framework/XRay" x86_64 "$IOS_VERSION" || rc=1
+if [ "$rc" -ne 0 ]; then
+  echo "   deployment targets do not match IOS_VERSION/MACOS_VERSION" >&2
+  exit 1
+fi
 
 echo
 echo "==> slices"
