@@ -71,6 +71,18 @@ void main() {
     expect(dnsRule['port'], 53);
   });
 
+  test('the dns outbound refuses HTTPS/SVCB rather than leaving it to a default', () {
+    // Pinned, not inherited: an ipv6hint in an HTTPS record hands a client an
+    // IPv6 address without it ever asking for AAAA. Xray's default happens to
+    // be 'reject' today, which is what we want, but it is not ours to assume.
+    final outbounds = (_build()['outbounds']! as List<dynamic>).cast<Map<String, dynamic>>();
+    final dnsOut = outbounds.firstWhere((o) => o['tag'] == 'dns-out');
+    expect((dnsOut['settings']! as Map<String, dynamic>)['nonIPQuery'], 'reject');
+    // blockTypes would answer AAAA with REFUSED instead of an empty NOERROR,
+    // which some stub resolvers treat as a dead server.
+    expect((dnsOut['settings']! as Map<String, dynamic>).containsKey('blockTypes'), isFalse);
+  });
+
   test('the query strategy can be relaxed once the exits carry IPv6', () {
     final uri = VlessUri.parse(testnetUri);
     final config = XrayConfig.build(uri, queryStrategy: 'UseIP');

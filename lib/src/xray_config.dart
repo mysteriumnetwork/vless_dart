@@ -71,10 +71,16 @@ abstract final class XrayConfig {
           },
           <String, dynamic>{'tag': 'direct', 'protocol': 'freedom'},
           <String, dynamic>{'tag': 'block', 'protocol': 'blackhole'},
-          // Hands DNS to Xray's resolver, which honours queryStrategy. Its default
-          // nonIPQuery: 'drop' also drops HTTPS/SVCB records, whose ipv6hint would
-          // otherwise put clients back on IPv6.
-          <String, dynamic>{'tag': 'dns-out', 'protocol': 'dns'},
+          // Hands DNS to Xray's resolver, which honours [queryStrategy]: an AAAA
+          // query comes back NOERROR with no answers, so clients drop to A at once
+          // instead of waiting. nonIPQuery is pinned rather than left to Xray's
+          // default so it cannot change under us; it refuses HTTPS/SVCB, whose
+          // ipv6hint hands clients an IPv6 address without ever asking for AAAA.
+          <String, dynamic>{
+            'tag': 'dns-out',
+            'protocol': 'dns',
+            'settings': <String, dynamic>{'nonIPQuery': 'reject'},
+          },
         ],
         // IPv6 goes through the proxy, not a blackhole. Blackholing it looked
         // safe but is not: hev completes the local TCP handshake before asking
