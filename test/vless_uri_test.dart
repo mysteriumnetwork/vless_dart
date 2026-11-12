@@ -20,6 +20,20 @@ void main() {
       expect(uri.label, 'Mysterium VLESS');
     });
 
+    test('falls back to the raw label rather than rejecting the URI', () {
+      // %ZZ is a malformed escape (ArgumentError); %FF is a well-formed escape
+      // that is not valid UTF-8 (FormatException). Neither says anything about
+      // whether the connection details are usable.
+      for (final fragment in <String>['bad%ZZ', 'bad%FF', 'trunc%']) {
+        final uri = VlessUri.parse(
+          'vless://f7422437-7044-4599-8165-5f7ae7311fc4@example.com:443'
+          '?type=ws&security=tls#$fragment',
+        );
+        expect(uri.label, fragment);
+        expect(uri.address, 'example.com');
+      }
+    });
+
     test('defaults the port to 443', () {
       final uri = VlessUri.parse(
         'vless://f7422437-7044-4599-8165-5f7ae7311fc4@example.com?type=ws&security=tls',

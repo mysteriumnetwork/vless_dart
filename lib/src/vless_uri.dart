@@ -77,6 +77,10 @@ class VlessUri {
     try {
       return Uri.decodeComponent(fragment);
     } on ArgumentError {
+      // A malformed escape, e.g. `%ZZ` or a truncated `%`.
+      return fragment;
+    } on FormatException {
+      // Well-formed escapes that are not valid UTF-8, e.g. `%FF`.
       return fragment;
     }
   }

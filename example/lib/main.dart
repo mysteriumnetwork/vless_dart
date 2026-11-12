@@ -98,11 +98,15 @@ class _HomePageState extends State<_HomePage> {
       });
       final current = await _vpn.getVPNStatus();
       setState(() => _status = current);
+      if (current == ConnectionStatus.connected) {
+        // The stream reports changes only, so a relaunch over a live tunnel
+        // would otherwise show no statistics until the next transition.
+        _startStatsPolling();
+      }
       debugPrint('[EXAMPLE] initialize ok');
       if (_autoConnect) {
         if (current == ConnectionStatus.connected) {
           debugPrint('[EXAMPLE] already connected; skipping auto-connect');
-          _startStatsPolling();
           _autoCheckDone = true;
           unawaited(_autoCheck());
         } else {

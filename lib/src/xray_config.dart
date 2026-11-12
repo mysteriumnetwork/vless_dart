@@ -90,8 +90,18 @@ abstract final class XrayConfig {
         // dual-stack site on a cold socket pool.
         'routing': <String, dynamic>{
           'rules': <dynamic>[
-            // Everything else, IPv6 included, falls through to 'proxy'.
-            <String, dynamic>{'type': 'field', 'port': 53, 'outboundTag': 'dns-out'},
+            // Scoped to the inbound on purpose. Unscoped, this also catches the
+            // built-in resolver's own upstream queries to the servers above;
+            // `dns-out` recognises those as its own and writes them straight to
+            // a direct dial, so the real lookups leave in plaintext from the
+            // device's own address. Restricted here, they miss every rule and
+            // fall through to 'proxy' like everything else, IPv6 included.
+            <String, dynamic>{
+              'type': 'field',
+              'inboundTag': <dynamic>['socks-in'],
+              'port': 53,
+              'outboundTag': 'dns-out',
+            },
           ],
         },
       };

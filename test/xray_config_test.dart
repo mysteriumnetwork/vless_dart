@@ -71,6 +71,18 @@ void main() {
     expect(dnsRule['port'], 53);
   });
 
+  test('intercepts only the client\'s DNS, not the resolver\'s own queries', () {
+    // Unscoped, the port-53 rule also matches the built-in resolver's upstream
+    // queries to 1.1.1.1. dns-out identifies those as its own link and writes
+    // them to a direct dial instead of handling them, so the real lookups would
+    // leave the device in plaintext, outside the tunnel.
+    final rules = (_build()['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
+    final dnsRule =
+        rules.firstWhere((dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out')
+            as Map<String, dynamic>;
+    expect(dnsRule['inboundTag'], <String>['socks-in']);
+  });
+
   test('the dns outbound refuses HTTPS/SVCB rather than leaving it to a default', () {
     // Pinned, not inherited: an ipv6hint in an HTTPS record hands a client an
     // IPv6 address without it ever asking for AAAA. Xray's default happens to

@@ -28,6 +28,33 @@ class VPNUtils {
     var status: FlutterEventSink?
     private var vpnStatusObserver: NSObjectProtocol?
 
+    /// Invalidates a connect that is still settling its preferences or waiting
+    /// on a retry. Without it a stop issued inside that window is a no-op on a
+    /// connection that has not started yet, and the tunnel comes up afterwards.
+    private var connectGeneration = 0
+    private let connectGenerationLock = NSLock()
+
+    /// NE completion handlers arrive on an unspecified queue, so the counter is
+    /// guarded rather than confined to one.
+    private func beginConnect() -> Int {
+        connectGenerationLock.lock()
+        defer { connectGenerationLock.unlock() }
+        connectGeneration += 1
+        return connectGeneration
+    }
+
+    private func cancelPendingConnect() {
+        connectGenerationLock.lock()
+        defer { connectGenerationLock.unlock() }
+        connectGeneration += 1
+    }
+
+    private func isCurrentConnect(_ generation: Int) -> Bool {
+        connectGenerationLock.lock()
+        defer { connectGenerationLock.unlock() }
+        return connectGeneration == generation
+    }
+
     /// Picks only our own manager. The host app also has WireGuard and OpenVPN
     /// configurations, and adopting one of those would make `configureVPN`
     /// overwrite another protocol's saved profile.
@@ -145,10 +172,16 @@ class VPNUtils {
             return
         }
 
+        let generation = beginConnect()
+
         manager.loadFromPreferences { [weak self] error in
             guard let self else { return }
             if let error {
                 completion(error)
+                return
+            }
+            guard self.isCurrentConnect(generation) else {
+                completion(Self.connectCancelled)
                 return
             }
 
@@ -169,7 +202,12 @@ class VPNUtils {
                 }
                 // saveToPreferences is not fully settled when its completion
                 // fires; starting immediately races it.
-                self.startTunnel(on: manager, attempt: 0, completion: completion)
+                self.startTunnel(
+                    on: manager,
+                    attempt: 0,
+                    generation: generation,
+                    completion: completion
+                )
             }
         }
     }
@@ -184,8 +222,13 @@ class VPNUtils {
     private func startTunnel(
         on manager: NETunnelProviderManager,
         attempt: Int,
+        generation: Int,
         completion: @escaping (Error?) -> Void
     ) {
+        guard isCurrentConnect(generation) else {
+            completion(Self.connectCancelled)
+            return
+        }
         do {
             try manager.connection.startVPNTunnel(options: [:])
             observeStatus()
@@ -200,7 +243,12 @@ class VPNUtils {
             // and the start error is the one worth reporting if they run out.
             manager.loadFromPreferences { _ in
                 DispatchQueue.main.asyncAfter(deadline: .now() + Self.startRetryDelay) {
-                    self.startTunnel(on: manager, attempt: attempt + 1, completion: completion)
+                    self.startTunnel(
+                        on: manager,
+                        attempt: attempt + 1,
+                        generation: generation,
+                        completion: completion
+                    )
                 }
             }
         }
@@ -259,10 +307,12 @@ class VPNUtils {
     }
 
     func stopVPN() {
+        cancelPendingConnect()
         providerManager?.connection.stopVPNTunnel()
     }
 
     func removeTunnelConfiguration(completion: @escaping (Error?) -> Void) {
+        cancelPendingConnect()
         guard let manager = providerManager else {
             // Reporting success here would claim a removal that never happened.
             completion(Self.error(-11, "No tunnel configuration to remove"))
@@ -290,6 +340,9 @@ class VPNUtils {
         }
         return address
     }
+
+    /// Reported to a connect that a stop or removal overtook.
+    static let connectCancelled = error(-12, "Connect cancelled")
 
     private static func error(_ code: Int, _ message: String) -> NSError {
         NSError(domain: "VlessDart", code: code, userInfo: [NSLocalizedDescriptionKey: message])
