@@ -1,0 +1,25 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Test: Dart",
+            "type": "shell",
+            "command": "fvm flutter test",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Check (format + analyze + test)",
+            "type": "shell",
+            "command": "make check",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Tunnel logs (macOS extension)",
+            "type": "shell",
+            "command": "log stream --predicate 'subsystem CONTAINS \"XrayTunnel\"' --info --debug",
+            "problemMatcher": []
+        }
+    ]
+}

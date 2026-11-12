@@ -1,0 +1,59 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "macOS-debug",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "debug",
+            "deviceId": "macos"
+        },
+        {
+            "name": "macOS-profile",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "deviceId": "macos"
+        },
+        {
+            "name": "macOS-release",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "release",
+            "deviceId": "macos"
+        },
+        {
+            "name": "iOS-debug",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "debug",
+            "deviceId": "ios"
+        },
+        {
+            "name": "iOS-profile",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "deviceId": "ios"
+        },
+        {
+            "name": "iOS-release (memory measurement)",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "release",
+            "deviceId": "ios"
+        }
+    ]
+}

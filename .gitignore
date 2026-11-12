@@ -7,8 +7,6 @@
 .buildlog/
 .history
 
-
-
 # Flutter repo-specific
 /bin/cache/
 /bin/internal/bootstrap.bat
@@ -117,3 +115,18 @@ app.*.symbols
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
 !/dev/ci/**/Gemfile.lock
+# Superpowers specs and plans — kept local, not tracked
+/docs/
+
+# SwiftPM scratch. Unanchored: the package sits at darwin/vless_dart/, so a
+# leading slash would miss its .build/ entirely.
+.build/
+
+# Xcode project backups
+*.pbxproj.bak
+
+# JetBrains IDE state
+.idea/
+
+# FVM Version Cache
+.fvm/

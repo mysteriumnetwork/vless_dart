@@ -1,0 +1,43 @@
+name: CI
+
+# Dart only. The Xray core and the tunnel module live in
+# github.com/mysteriumnetwork/vless-apple and are tested there.
+#
+# The plugin's own Swift tests need a signed macOS build — the example that
+# hosts them carries a NetworkExtension entitlement — so they stay local behind
+# `make test-swift` until signing secrets are in place.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter Version Management CLI
+        uses: flutter-actions/setup-fvm@v1.0 #v1.0 is tag, v1 is branch
+        with:
+          version: 4.0.5
+
+      - name: Install Flutter SDK
+        run: echo yes | fvm use
+
+      - run: fvm flutter pub get
+
+      - name: Format
+        run: fvm dart format --line-length 100 --set-exit-if-changed lib test example/lib
+
+      - name: Analyze
+        run: fvm flutter analyze
+
+      - name: Test
+        run: fvm flutter test
+
