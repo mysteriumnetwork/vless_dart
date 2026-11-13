@@ -72,9 +72,7 @@ class VlessDart {
     final xray = jsonEncode(
       XrayConfig.build(
         VlessUri.parse(config),
-        dnsServers: dnsAddress == null || dnsAddress.trim().isEmpty
-            ? XrayConfig.defaultDnsServers
-            : <String>[dnsAddress],
+        dnsServers: dnsAddress == null ? XrayConfig.defaultDnsServers : <String>[dnsAddress],
       ),
     );
 

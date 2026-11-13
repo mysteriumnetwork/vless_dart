@@ -84,6 +84,28 @@ void main() {
     expect((config['dns']! as Map<String, dynamic>)['servers'], XrayConfig.defaultDnsServers);
   });
 
+  test('connect trims a padded resolver instead of handing it to Xray', () async {
+    final vless = await initialized();
+    await vless.connect(testnetUri, dnsAddress: ' 1.1.1.3 ');
+
+    final connect = calls.firstWhere((MethodCall c) => c.method == 'connect');
+    final raw = (connect.arguments as Map<dynamic, dynamic>)['config'] as String;
+    final config = jsonDecode(raw) as Map<String, dynamic>;
+
+    expect((config['dns']! as Map<String, dynamic>)['servers'], <String>['1.1.1.3']);
+  });
+
+  test('connect with a blank resolver keeps the defaults', () async {
+    final vless = await initialized();
+    await vless.connect(testnetUri, dnsAddress: '  ');
+
+    final connect = calls.firstWhere((MethodCall c) => c.method == 'connect');
+    final raw = (connect.arguments as Map<dynamic, dynamic>)['config'] as String;
+    final config = jsonDecode(raw) as Map<String, dynamic>;
+
+    expect((config['dns']! as Map<String, dynamic>)['servers'], XrayConfig.defaultDnsServers);
+  });
+
   test('connect before initialize throws', () async {
     expect(() => VlessDart().connect(testnetUri), throwsStateError);
   });

@@ -20,11 +20,15 @@ abstract final class XrayConfig {
   /// Resolvers used when the caller names none.
   static const defaultDnsServers = <String>['1.1.1.1', '1.0.0.1'];
 
-  /// Drops blanks and falls back rather than handing Xray an empty list, which
-  /// fails its own validation. The caller reads these from remote config, so a
-  /// missing value is reachable.
+  /// Trims, drops blanks, and falls back rather than handing Xray an empty
+  /// list, which fails its own validation. The caller reads these from remote
+  /// config, so a missing value or a stray space is reachable, and Xray takes
+  /// a padded address literally.
   static List<String> _resolvers(List<String> servers) {
-    final named = servers.where((server) => server.trim().isNotEmpty).toList();
+    final named = servers
+        .map((server) => server.trim())
+        .where((server) => server.isNotEmpty)
+        .toList();
     return named.isEmpty ? defaultDnsServers : named;
   }
 

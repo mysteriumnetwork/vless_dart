@@ -66,6 +66,13 @@ void main() {
       expect(serversOf(config), <String>['1.1.1.3']);
     });
 
+    test('trims, since a remote config value can arrive padded', () {
+      final config = XrayConfig.build(VlessUri.parse(testnetUri), dnsServers: const [' 1.1.1.3 ']);
+
+      // Xray takes the address literally, so the space would be the resolver.
+      expect(serversOf(config), <String>['1.1.1.3']);
+    });
+
     test('falls back rather than leaving Xray with no resolver', () {
       // The caller reads this from remote config, so a missing or blank value
       // is reachable; an empty `servers` list fails Xray's own validation.
