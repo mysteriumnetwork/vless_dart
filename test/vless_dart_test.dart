@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vless_dart/src/exceptions.dart';
+import 'package:vless_dart/src/xray_config.dart';
 import 'package:vless_dart/vless_dart.dart';
 import 'package:vless_dart/vpn_status.dart';
 
@@ -59,6 +60,28 @@ void main() {
     final config = jsonDecode(raw) as Map<String, dynamic>;
     expect(config['outbounds'], isNotNull);
     expect(config['inbounds'], isNotNull);
+  });
+
+  test('connect carries the chosen resolver into the Xray config', () async {
+    final vless = await initialized();
+    await vless.connect(testnetUri, dnsAddress: '1.1.1.3');
+
+    final connect = calls.firstWhere((MethodCall c) => c.method == 'connect');
+    final raw = (connect.arguments as Map<dynamic, dynamic>)['config'] as String;
+    final config = jsonDecode(raw) as Map<String, dynamic>;
+
+    expect((config['dns']! as Map<String, dynamic>)['servers'], <String>['1.1.1.3']);
+  });
+
+  test('connect without a resolver keeps the defaults', () async {
+    final vless = await initialized();
+    await vless.connect(testnetUri);
+
+    final connect = calls.firstWhere((MethodCall c) => c.method == 'connect');
+    final raw = (connect.arguments as Map<dynamic, dynamic>)['config'] as String;
+    final config = jsonDecode(raw) as Map<String, dynamic>;
+
+    expect((config['dns']! as Map<String, dynamic>)['servers'], XrayConfig.defaultDnsServers);
   });
 
   test('connect before initialize throws', () async {

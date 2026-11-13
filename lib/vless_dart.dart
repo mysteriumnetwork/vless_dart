@@ -58,14 +58,25 @@ class VlessDart {
   /// into an Xray config here, so a malformed or unsupported URI fails before
   /// anything reaches the platform.
   ///
+  /// [dnsAddress] names the resolver that answers inside the tunnel, so a
+  /// caller offering content filtering can point it at a filtering resolver.
+  /// Omitted or empty keeps [XrayConfig.defaultDnsServers].
+  ///
   /// Resolves once the tunnel has been *requested to start*, not once it is
   /// connected. Progress and failures arrive via [statusStream].
-  Future<void> connect(String config) async {
+  Future<void> connect(String config, {String? dnsAddress}) async {
     if (!initialized) {
       throw StateError('VlessDart must be initialized before connecting');
     }
 
-    final xray = jsonEncode(XrayConfig.build(VlessUri.parse(config)));
+    final xray = jsonEncode(
+      XrayConfig.build(
+        VlessUri.parse(config),
+        dnsServers: dnsAddress == null || dnsAddress.trim().isEmpty
+            ? XrayConfig.defaultDnsServers
+            : <String>[dnsAddress],
+      ),
+    );
 
     try {
       await _channelControl.invokeMethod('connect', <String, dynamic>{'config': xray});

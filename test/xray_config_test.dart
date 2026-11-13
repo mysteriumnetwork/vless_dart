@@ -52,6 +52,34 @@ void main() {
     expect(settings['udp'], true);
   });
 
+  group('dns servers', () {
+    List<dynamic> serversOf(Map<String, dynamic> config) =>
+        (config['dns']! as Map<String, dynamic>)['servers']! as List<dynamic>;
+
+    test('defaults to the Cloudflare pair', () {
+      expect(serversOf(_build()), XrayConfig.defaultDnsServers);
+    });
+
+    test('uses the caller\'s resolver, which is what content filtering needs', () {
+      final config = XrayConfig.build(VlessUri.parse(testnetUri), dnsServers: const ['1.1.1.3']);
+
+      expect(serversOf(config), <String>['1.1.1.3']);
+    });
+
+    test('falls back rather than leaving Xray with no resolver', () {
+      // The caller reads this from remote config, so a missing or blank value
+      // is reachable; an empty `servers` list fails Xray's own validation.
+      for (final empty in const [
+        <String>[],
+        <String>[''],
+        <String>['  '],
+      ]) {
+        final config = XrayConfig.build(VlessUri.parse(testnetUri), dnsServers: empty);
+        expect(serversOf(config), XrayConfig.defaultDnsServers, reason: 'for $empty');
+      }
+    });
+  });
+
   test('resolves IPv4 only, so clients never attempt IPv6', () {
     final config = _build();
     final dns = config['dns']! as Map<String, dynamic>;
