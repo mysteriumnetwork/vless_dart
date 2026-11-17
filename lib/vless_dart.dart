@@ -21,8 +21,7 @@ class VlessDart {
   VlessDart();
 
   static bool get _isApple =>
-      defaultTargetPlatform == TargetPlatform.iOS ||
-      defaultTargetPlatform == TargetPlatform.macOS;
+      defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
 
   static const String _eventChannelVpnStatus = 'id.mysteriumvpn.vless_dart/vpnstatus';
   static const String _methodChannelVpnControl = 'id.mysteriumvpn.vless_dart/vpncontrol';
