@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- Declared here, not left to the host: Flutter app templates only
+	     put INTERNET in the debug and profile manifests, so a release
+	     build of a host that never declares it cannot open a socket. -->
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+
+	<application>
+		<!--
+		  Declared by the plugin rather than left to each app: the tunnel
+		  cannot start without it, and a missing declaration fails at runtime
+		  with no build-time warning. An app that needs a different
+		  foregroundServiceType can override it with tools:replace.
+		-->
+		<service
+			android:name="network.mysterium.vless_dart.VlessVpnService"
+			android:exported="false"
+			android:foregroundServiceType="systemExempted"
+			android:permission="android.permission.BIND_VPN_SERVICE">
+			<intent-filter>
+				<action android:name="android.net.VpnService" />
+			</intent-filter>
+		</service>
+	</application>
+</manifest>

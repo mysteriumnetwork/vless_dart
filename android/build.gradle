@@ -1,0 +1,115 @@
+group 'network.mysterium.vless_dart'
+version '1.0-SNAPSHOT'
+
+// The core is published as XRay.aar beside XRay.xcframework, so one release
+// pins Android and Apple to the same Xray-core build.
+ext.xrayCoreTag = 'xray-v26.3.27-6'
+ext.xrayCoreUrl = "https://github.com/mysteriumnetwork/vless-core/releases/download/${xrayCoreTag}/XRay.aar"
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+def xrayDir = file("${buildDir}/xray")
+// Named for the tag: a bump must not be satisfied by the previously cached
+// download sitting under the same filename.
+def xrayAar = file("${xrayDir}/XRay-${xrayCoreTag}.aar")
+def xrayUnpacked = file("${xrayDir}/unpacked")
+
+// A local build wins, so the core can be iterated on without publishing a
+// release. Resolved against projectDir, not rootDir: when the plugin is built
+// inside an app, rootDir is the app's.
+def localCore = [
+        System.getenv('VLESS_LOCAL_CORE'),
+        "${projectDir}/../../vless-core/Artifacts/XRay.aar",
+        "${projectDir}/../../vless-apple/Artifacts/XRay.aar",
+].findAll { it }.collect { file(it) }.find { it.exists() }
+
+// An aar cannot be nested inside another aar, so the core is unpacked and its
+// two halves are fed in separately: the classes as a local jar, which AGP does
+// package for consumers, and the .so files as a jniLibs source directory.
+def unpackXrayCore = tasks.register('unpackXrayCore') {
+    // Without declared inputs the task is UP-TO-DATE across a tag bump or a
+    // locally rebuilt core, so a warm build directory keeps linking the old
+    // one while this file claims the new one.
+    inputs.property('tag', xrayCoreTag)
+    inputs.property('localCore', localCore ? "${localCore}@${localCore.lastModified()}" : '')
+    outputs.dir(xrayUnpacked)
+    doLast {
+        xrayDir.mkdirs()
+        if (localCore != null) {
+            logger.lifecycle("vless_dart: using local core ${localCore}")
+            xrayAar.bytes = localCore.bytes
+        } else if (!xrayAar.exists()) {
+            logger.lifecycle("vless_dart: fetching core ${xrayCoreUrl}")
+            new URL(xrayCoreUrl).withInputStream { input ->
+                xrayAar.withOutputStream { it << input }
+            }
+        }
+        delete xrayUnpacked
+        copy {
+            from zipTree(xrayAar)
+            into xrayUnpacked
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    // preBuild alone is an anchor the native merge is not guaranteed to run
+    // after, so name that task too: losing the race ships an apk with no
+    // libgojni.so, which dies at System.loadLibrary on the first connect.
+    if (task.name == 'preBuild' || task.name ==~ /merge.*JniLibFolders/) {
+        task.dependsOn unpackXrayCore
+    }
+}
+
+android {
+    compileSdkVersion 36
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+        main.jniLibs.srcDirs += "${xrayUnpacked}/jni"
+    }
+
+    defaultConfig {
+        // Matches the -androidapi the core is built with.
+        minSdkVersion 26
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    namespace 'network.mysterium.vless_dart'
+}
+
+dependencies {
+    // builtBy, not a bare file: a plain path carries no provenance, so the
+    // app's dexing task would consume the jar without waiting for the unpack.
+    implementation files("${xrayUnpacked}/classes.jar") { builtBy unpackXrayCore }
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+
+    testImplementation 'org.jetbrains.kotlin:kotlin-test'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    // android.jar stubs org.json to throw, so unit tests need the real one.
+    testImplementation 'org.json:json:20231013'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}

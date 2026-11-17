@@ -7,8 +7,14 @@ import 'package:vless_dart/vless_dart.dart';
 import 'package:vless_dart/vpn_statistics.dart';
 import 'package:vless_dart/vpn_status.dart';
 
-/// Paste a `vless://` URI from the API here, or edit it in the field.
-const _defaultUri =
+/// Pass `--dart-define=VLESS_URI=...` to use a fresh credential, or edit it in the field.
+const _uriFromEnv = String.fromEnvironment('VLESS_URI');
+
+/// Compared rather than defaulted: a launch config that prompts for the URI
+/// still defines the key when the prompt is left empty.
+const _defaultUri = _uriFromEnv == '' ? _sampleUri : _uriFromEnv;
+
+const _sampleUri =
     'vless://9d08cc5e-e71d-4ab0-9436-d0043578ca64@supervpn-dc-testnet-01.mysterium.network:443'
     '?encryption=none&host=supervpn-dc-testnet-01.mysterium.network&path=%2Fvless'
     '&security=tls&sni=supervpn-dc-testnet-01.mysterium.network&type=ws#Mysterium%20VLESS';

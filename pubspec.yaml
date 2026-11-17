@@ -21,6 +21,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
+      android:
+        package: network.mysterium.vless_dart
+        pluginClass: VlessDartPlugin
       ios:
         pluginClass: VlessDartPlugin
         sharedDarwinSource: true
