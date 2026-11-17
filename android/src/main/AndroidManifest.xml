@@ -22,6 +22,16 @@
 			<intent-filter>
 				<action android:name="android.net.VpnService" />
 			</intent-filter>
+			<!--
+			  The intent filter above is what makes the service eligible for
+			  Always-on VPN, but a system-initiated start has no config to
+			  bring up and stops again immediately. With "block connections
+			  without VPN" that leaves the device offline, so the capability
+			  is declined until a config can be restored without a Dart call.
+			-->
+			<meta-data
+				android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+				android:value="false" />
 		</service>
 	</application>
 </manifest>

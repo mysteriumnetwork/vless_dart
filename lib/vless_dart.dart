@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:vless_dart/src/vless_uri.dart';
 import 'package:vless_dart/src/xray_config.dart';
@@ -13,11 +14,15 @@ import 'package:vless_dart/vpn_status.dart';
 /// and observe progress via [statusStream] (or poll [getVPNStatus]). Live
 /// traffic counters are available from [tunnelStatistics].
 ///
-/// Supported platforms: iOS and macOS (NetworkExtension). The API mirrors
-/// `openvpn_dart` method-for-method so the two engines are interchangeable
-/// behind a shared repository.
+/// Supported platforms: iOS and macOS (NetworkExtension) and Android
+/// (VpnService). The API mirrors `openvpn_dart` method-for-method so the
+/// two engines are interchangeable behind a shared repository.
 class VlessDart {
   VlessDart();
+
+  static bool get _isApple =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.macOS;
 
   static const String _eventChannelVpnStatus = 'id.mysteriumvpn.vless_dart/vpnstatus';
   static const String _methodChannelVpnControl = 'id.mysteriumvpn.vless_dart/vpncontrol';
@@ -33,10 +38,14 @@ class VlessDart {
   /// Whether [initialize] has run.
   bool initialized = false;
 
-  /// Prepare the plugin. Required on iOS and macOS before anything else.
+  /// Prepare the plugin. Required before anything else.
+  ///
+  /// Both arguments configure the NetworkExtension profile and are required
+  /// on iOS and macOS. Android builds its tunnel from the config passed to
+  /// [connect] and ignores them.
   Future<void> initialize({String? providerBundleIdentifier, String? localizedDescription}) async {
     assert(
-      providerBundleIdentifier != null && localizedDescription != null,
+      !_isApple || (providerBundleIdentifier != null && localizedDescription != null),
       'These values are required on iOS and macOS.',
     );
 

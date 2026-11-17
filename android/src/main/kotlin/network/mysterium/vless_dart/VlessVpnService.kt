@@ -34,6 +34,10 @@ class VlessVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        // Before anything that can fail: every teardown path from here is
+        // ownership-checked, and an unregistered service is indistinguishable
+        // from a previous session whose destroy has not been delivered yet.
+        VlessBackend.onServiceCreated(this)
         notifications = NotificationHelper(this)
         NotificationHelper.initNotificationChannel(this)
 
@@ -119,7 +123,7 @@ class VlessVpnService : VpnService() {
     /** The user revoked VPN permission, or another VPN app took over. */
     override fun onRevoke() {
         Log.i(TAG, "VPN permission revoked")
-        VlessBackend.disconnect()
+        VlessBackend.onRevoked(this)
         super.onRevoke()
     }
 

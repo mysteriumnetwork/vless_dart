@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 
 class VlessDartPlugin :
@@ -74,7 +75,13 @@ class VlessDartPlugin :
             // declares its service in the manifest and needs neither.
             "initialize" -> result.success(null)
             "status" -> result.success(VlessBackend.status.name)
-            "tunnelStatistics" -> result.success(VlessBackend.statisticsJson())
+            // Off the main thread: the counters are Go calls that take the
+            // same package-wide mutex Xray holds for the whole of a start or
+            // stop, and the caller polls them on a timer while connected.
+            "tunnelStatistics" -> scope.launch {
+                val stats = withContext(Dispatchers.IO) { VlessBackend.statisticsJson() }
+                result.success(stats)
+            }
             "checkTunnelConfiguration" -> result.success(hasConsent())
             "setupTunnel" -> requestConsent(result)
             "connect" -> connect(call, result)

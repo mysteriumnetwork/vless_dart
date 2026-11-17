@@ -42,18 +42,35 @@ def unpackXrayCore = tasks.register('unpackXrayCore') {
     outputs.dir(xrayUnpacked)
     doLast {
         xrayDir.mkdirs()
-        if (localCore != null) {
-            logger.lifecycle("vless_dart: using local core ${localCore}")
-            xrayAar.bytes = localCore.bytes
-        } else if (!xrayAar.exists()) {
-            logger.lifecycle("vless_dart: fetching core ${xrayCoreUrl}")
-            new URL(xrayCoreUrl).withInputStream { input ->
-                xrayAar.withOutputStream { it << input }
+        def source = localCore
+        if (source != null) {
+            // Unpacked straight from the override. Copying it into the
+            // tag-named cache would outlive the override: the next build finds
+            // no local core, sees the cache entry already there, skips the
+            // download and keeps shipping the development build.
+            logger.lifecycle("vless_dart: using local core ${source}")
+        } else {
+            if (!xrayAar.exists()) {
+                logger.lifecycle("vless_dart: fetching core ${xrayCoreUrl}")
+                // Written beside the cache entry and moved in only once the
+                // stream completes: a half-written file still satisfies
+                // exists(), so a dropped connection would leave every later
+                // build skipping the fetch and failing to unpack the remains.
+                def partial = file("${xrayAar}.part")
+                delete partial
+                new URL(xrayCoreUrl).withInputStream { input ->
+                    partial.withOutputStream { it << input }
+                }
+                if (!partial.renameTo(xrayAar)) {
+                    xrayAar.bytes = partial.bytes
+                    delete partial
+                }
             }
+            source = xrayAar
         }
         delete xrayUnpacked
         copy {
-            from zipTree(xrayAar)
+            from zipTree(source)
             into xrayUnpacked
         }
     }

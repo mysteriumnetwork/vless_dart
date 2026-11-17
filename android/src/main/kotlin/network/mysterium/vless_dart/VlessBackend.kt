@@ -72,6 +72,12 @@ object VlessBackend {
      */
     suspend fun connect(context: Context, rawConfig: String) = withContext(lifecycle) {
         check(VpnService.prepare(context) == null) { "VPN permission has not been granted" }
+        // One session at a time. A second connect would otherwise overwrite
+        // `pending` before the first service consumed it, so one start takes
+        // the other's config and the other finds none and stops the service.
+        check(status == ConnectionStatus.disconnected) {
+            "a tunnel is already ${status.name}, disconnect first"
+        }
 
         val prepared = XrayConfigPreparer.prepare(rawConfig)
         // IPv4 only: getByName returns whichever family the resolver sorts
@@ -183,7 +189,6 @@ object VlessBackend {
                 throw e
             }
 
-            service = host
             _statusFlow.value = ConnectionStatus.connected
             return true
         } catch (e: Exception) {
@@ -217,18 +222,45 @@ object VlessBackend {
 
         service?.let { host ->
             service = null
-            host.shutdown()
+            // Reached from onDestroy as well, where the service is already on
+            // its way out and the stop calls have nothing left to act on.
+            runCatching { host.shutdown() }.onFailure { Log.w(TAG, "shutdown", it) }
         }
         pending = null
         _statusFlow.value = ConnectionStatus.disconnected
     }
 
+    /**
+     * Registers the service that owns the tunnel.
+     *
+     * At creation rather than once the tunnel is up: the window in between is
+     * exactly when a previous session's teardown can still arrive, and only a
+     * registered owner tells the two sessions apart.
+     */
+    fun onServiceCreated(host: VlessVpnService) {
+        service = host
+    }
+
     /** Called by the service when the system or the user stops it. */
-    fun onServiceDestroyed(host: VlessVpnService) {
-        if (service === host) {
-            service = null
+    fun onServiceDestroyed(host: VlessVpnService) = stopIfOwner(host)
+
+    /** The user revoked VPN permission, or another VPN app took over. */
+    fun onRevoked(host: VlessVpnService) = stopIfOwner(host)
+
+    /**
+     * Tears the tunnel down, but only for the service that owns it.
+     *
+     * Android delivers onDestroy long after stopSelf, and the caller reconnects
+     * as soon as the status reads `disconnected` — which stopNow sets before
+     * the old service is gone. An unconditional teardown here therefore lands
+     * on the session that replaced it and stops a tunnel it never owned.
+     */
+    private fun stopIfOwner(host: VlessVpnService) {
+        scope.launch {
+            if (service === host) {
+                stopNow()
+            }
         }
-        scope.launch { stopNow() }
     }
 
     /**
