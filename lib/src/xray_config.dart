@@ -40,7 +40,7 @@ abstract final class XrayConfig {
     String queryStrategy = ipv4Only,
     List<String> dnsServers = defaultDnsServers,
   }) => <String, dynamic>{
-    'log': <String, dynamic>{'loglevel': 'warning'},
+    'log': <String, dynamic>{'loglevel': 'debug'}, // TEMP-DIAGNOSTIC
     // Answers DNS inside the tunnel so [queryStrategy] applies. Without this
     // the query goes straight to the resolver and AAAA comes back regardless.
     'dns': <String, dynamic>{'servers': _resolvers(dnsServers), 'queryStrategy': queryStrategy},

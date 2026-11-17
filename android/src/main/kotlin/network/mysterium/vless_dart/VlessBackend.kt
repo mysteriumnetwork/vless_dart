@@ -178,15 +178,14 @@ object VlessBackend {
                 throw e
             }
 
+            // TEMP-DIAGNOSTIC: the probe no longer gates the tunnel, so a
+            // failure can be checked against real traffic. Restore the
+            // stopTun2Socks/stop/throw teardown here afterwards.
             try {
                 XRay.probe(PROBE_DOMAIN, PROBE_TIMEOUT_MS)
+                Log.i(TAG, "TEMP-DIAGNOSTIC probe OK")
             } catch (e: Exception) {
-                // Established is not the same as working: a server that
-                // refuses our credentials closes every connection, which would
-                // otherwise be reported as a healthy tunnel.
-                XRay.stopTun2Socks()
-                XRay.stop()
-                throw e
+                Log.e(TAG, "TEMP-DIAGNOSTIC probe FAILED, continuing anyway", e)
             }
 
             _statusFlow.value = ConnectionStatus.connected
