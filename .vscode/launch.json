@@ -34,8 +34,7 @@
             "type": "dart",
             "cwd": "example",
             "program": "lib/main.dart",
-            "flutterMode": "debug",
-            "deviceId": "ios"
+            "flutterMode": "debug"
         },
         {
             "name": "iOS-profile",
@@ -43,8 +42,7 @@
             "type": "dart",
             "cwd": "example",
             "program": "lib/main.dart",
-            "flutterMode": "profile",
-            "deviceId": "ios"
+            "flutterMode": "profile"
         },
         {
             "name": "iOS-release (memory measurement)",
@@ -52,8 +50,48 @@
             "type": "dart",
             "cwd": "example",
             "program": "lib/main.dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "Android-debug",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "debug",
+            "toolArgs": [
+                "--dart-define=VLESS_URI=${input:vlessUri}"
+            ]
+        },
+        {
+            "name": "Android-profile",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=VLESS_URI=${input:vlessUri}"
+            ]
+        },
+        {
+            "name": "Android-release",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
             "flutterMode": "release",
-            "deviceId": "ios"
+            "toolArgs": [
+                "--dart-define=VLESS_URI=${input:vlessUri}"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "vlessUri",
+            "type": "promptString",
+            "description": "vless:// URI - credentials rotate per connect, so paste a fresh one. Empty uses the sample in main.dart.",
+            "default": ""
         }
     ]
 }

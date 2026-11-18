@@ -20,6 +20,12 @@
             "type": "shell",
             "command": "log stream --predicate 'subsystem CONTAINS \"XrayTunnel\"' --info --debug",
             "problemMatcher": []
+        },
+        {
+            "label": "Tunnel logs (Android)",
+            "type": "shell",
+            "command": "\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\" logcat -v time GoLog:V VlessBackend:V VlessVpnService:V VlessDartPlugin:V VlessNotification:V flutter:V '*:S'",
+            "problemMatcher": []
         }
     ]
 }
