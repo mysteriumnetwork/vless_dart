@@ -84,6 +84,42 @@
             "toolArgs": [
                 "--dart-define=VLESS_URI=${input:vlessUri}"
             ]
+        },
+        {
+            "name": "Windows-debug",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "debug",
+            "deviceId": "windows",
+            "toolArgs": [
+                "--dart-define=VLESS_URI=${input:vlessUri}"
+            ]
+        },
+        {
+            "name": "Windows-profile",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "deviceId": "windows",
+            "toolArgs": [
+                "--dart-define=VLESS_URI=${input:vlessUri}"
+            ]
+        },
+        {
+            "name": "Windows-release",
+            "request": "launch",
+            "type": "dart",
+            "cwd": "example",
+            "program": "lib/main.dart",
+            "flutterMode": "release",
+            "deviceId": "windows",
+            "toolArgs": [
+                "--dart-define=VLESS_URI=${input:vlessUri}"
+            ]
         }
     ],
     "inputs": [
