@@ -1,3 +1,12 @@
+## 0.4.0
+
+* Windows support. The tunnel runs in a helper process, `vless_core.exe`,
+  built from the same `vless-core` module as the Apple and Android cores, so
+  one release tag pins every platform to the same Xray-core build. Packets
+  reach it through a wintun adapter; addressing, routing and DNS are
+  configured explicitly, because Windows has no `VpnService.Builder` or
+  `NEPacketTunnelProvider` to do it.
+
 ## 0.2.0
 
 * `connect` takes an optional `dnsAddress`, which becomes the resolver that

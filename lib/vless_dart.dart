@@ -14,9 +14,10 @@ import 'package:vless_dart/vpn_status.dart';
 /// and observe progress via [statusStream] (or poll [getVPNStatus]). Live
 /// traffic counters are available from [tunnelStatistics].
 ///
-/// Supported platforms: iOS and macOS (NetworkExtension) and Android
-/// (VpnService). The API mirrors `openvpn_dart` method-for-method so the
-/// two engines are interchangeable behind a shared repository.
+/// Supported platforms: iOS and macOS (NetworkExtension), Android
+/// (VpnService) and Windows (wintun, via a helper process). The API mirrors
+/// `openvpn_dart` method-for-method so the two engines are interchangeable
+/// behind a shared repository.
 class VlessDart {
   VlessDart();
 
