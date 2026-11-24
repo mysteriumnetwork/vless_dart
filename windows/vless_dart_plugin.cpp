@@ -1,7 +1,5 @@
 #include "vless_dart_plugin.h"
 
-#include <flutter/flutter_view.h>
-
 #include <utility>
 
 namespace vless_dart {
@@ -15,6 +13,9 @@ constexpr char kStatusChannel[] = "id.mysteriumvpn.vless_dart/vpnstatus";
 // loaded with LOAD_LIBRARY_SEARCH_APPLICATION_DIR, so it has to be next to the
 // executable that loads it rather than next to us.
 constexpr wchar_t kCoreExecutable[] = L"vless_core.exe";
+
+// Registered once per process; a second engine reuses it.
+constexpr wchar_t kWakeWindowClass[] = L"VlessDartWakeWindow";
 
 const flutter::EncodableValue* ValueOrNull(const flutter::EncodableMap& map,
                                            const char* key) {
@@ -62,31 +63,68 @@ void VlessDartPlugin::RegisterWithRegistrar(
   registrar->AddPlugin(std::move(plugin));
 }
 
-VlessDartPlugin::VlessDartPlugin(flutter::PluginRegistrarWindows* registrar)
-    : registrar_(registrar) {
+// The registrar is not retained: the channels are set up in
+// RegisterWithRegistrar and the wake window is the plugin's own.
+VlessDartPlugin::VlessDartPlugin(flutter::PluginRegistrarWindows*) {
   // A system-wide unique id rather than WM_APP + n, which another plugin
   // hooking the same window is free to use for something else.
   wake_message_ = RegisterWindowMessageW(L"VlessDartCoreEvent");
 
-  if (auto* view = registrar_->GetView()) {
-    // The root, not the view itself. The runner parents the Flutter view to a
-    // top-level window, and a top-level window proc delegate only ever sees
-    // that window's messages — posting to the child would go nowhere.
-    window_ = GetAncestor(view->GetNativeWindow(), GA_ROOT);
+  // A message-only window of our own rather than the runner's.
+  //
+  // The obvious route is RegisterTopLevelWindowProcDelegate plus a post to
+  // the view's root window, and it depends on two things the embedder does
+  // not promise: that registrar->GetView() is non-null, which is false in
+  // hosted and headless embeddings, and that the delegate sees a message
+  // posted to whatever GetAncestor reports. This window depends on neither.
+  //
+  // Created here because plugin registration runs on the platform thread, so
+  // the window belongs to it and the runner's own GetMessage loop -- which
+  // pumps every window on the thread -- dispatches to it. That is what puts
+  // Drain() on the platform thread, where the channels must be touched.
+  WNDCLASSEXW window_class = {};
+  window_class.cbSize = sizeof(window_class);
+  window_class.lpfnWndProc = WakeWindowProc;
+  window_class.hInstance = GetModuleHandleW(nullptr);
+  window_class.lpszClassName = kWakeWindowClass;
+  // A repeat registration fails with ERROR_CLASS_ALREADY_EXISTS, which is the
+  // expected result for a second engine in the same process and not a fault.
+  RegisterClassExW(&window_class);
+
+  window_ = CreateWindowExW(0, kWakeWindowClass, nullptr, 0, 0, 0, 0, 0,
+                            HWND_MESSAGE, nullptr, window_class.hInstance,
+                            this);
+  if (window_ == nullptr) {
+    OutputDebugStringA(
+        "vless_dart: no wake window; core events drain off the platform "
+        "thread\n");
   }
-  window_proc_id_ = registrar_->RegisterTopLevelWindowProcDelegate(
-      [this](HWND, UINT message, WPARAM, LPARAM) -> std::optional<LRESULT> {
-        if (message != wake_message_ || wake_message_ == 0) {
-          return std::nullopt;
-        }
-        Drain();
-        return 0;
-      });
+}
+
+LRESULT CALLBACK VlessDartPlugin::WakeWindowProc(HWND window, UINT message,
+                                                 WPARAM wparam,
+                                                 LPARAM lparam) {
+  if (message == WM_NCCREATE) {
+    auto* create = reinterpret_cast<CREATESTRUCTW*>(lparam);
+    SetWindowLongPtrW(window, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    return DefWindowProcW(window, message, wparam, lparam);
+  }
+
+  auto* self = reinterpret_cast<VlessDartPlugin*>(
+      GetWindowLongPtrW(window, GWLP_USERDATA));
+  if (self != nullptr && self->wake_message_ != 0 &&
+      message == self->wake_message_) {
+    self->Drain();
+    return 0;
+  }
+  return DefWindowProcW(window, message, wparam, lparam);
 }
 
 VlessDartPlugin::~VlessDartPlugin() {
-  if (window_proc_id_ != -1) {
-    registrar_->UnregisterTopLevelWindowProcDelegate(window_proc_id_);
+  if (window_ != nullptr) {
+    DestroyWindow(window_);
+    window_ = nullptr;
   }
   // Before the queue and the pending results go away: Stop joins the reader
   // thread, so nothing can be appended after this returns.

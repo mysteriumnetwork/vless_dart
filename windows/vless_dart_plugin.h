@@ -56,9 +56,11 @@ class VlessDartPlugin : public flutter::Plugin {
   void FailPending(const std::string& message);
 
   static std::wstring CoreExecutablePath();
+  static LRESULT CALLBACK WakeWindowProc(HWND window, UINT message,
+                                         WPARAM wparam, LPARAM lparam);
 
-  flutter::PluginRegistrarWindows* registrar_ = nullptr;
-  int window_proc_id_ = -1;
+  // A message-only window of the plugin's own, created on the platform
+  // thread. See the constructor for why the runner's window is not used.
   HWND window_ = nullptr;
   UINT wake_message_ = 0;
 
