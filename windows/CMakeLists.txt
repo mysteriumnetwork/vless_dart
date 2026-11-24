@@ -129,9 +129,15 @@ set(TEST_RUNNER "${PROJECT_NAME}_test")
 enable_testing()
 
 include(FetchContent)
+# Newer than the Flutter plugin template's release-1.11.0, which declares a
+# pre-3.5 cmake_minimum_required. CMake 4 refuses that outright; the CMake
+# bundled with Visual Studio only warns, so a local build passes and CI does
+# not. Hashed because FetchContent will otherwise take whatever the URL
+# serves.
 FetchContent_Declare(
   googletest
-  URL https://github.com/google/googletest/archive/release-1.11.0.zip
+  URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+  URL_HASH SHA256=f179ec217f9b3b3f3c6e8b02d3e7eda997b49e4ce26d6b235c9053bec9c0bf9f
 )
 # Prevent overriding the parent project's compiler/linker settings.
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
