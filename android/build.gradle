@@ -104,6 +104,11 @@ android {
         consumerProguardFiles 'consumer-rules.pro'
     }
 
+    // IVlessCore, the binder the plugin's process holds on the tunnel's.
+    buildFeatures {
+        aidl true
+    }
+
     namespace 'network.mysterium.vless_dart'
 }
 

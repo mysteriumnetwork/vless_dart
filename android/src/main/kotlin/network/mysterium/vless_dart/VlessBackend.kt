@@ -3,6 +3,7 @@ package network.mysterium.vless_dart
 import XRay.Protector
 import XRay.XRay
 import android.content.Context
+import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import java.util.concurrent.Executors
@@ -30,6 +31,17 @@ import kotlinx.coroutines.withContext
 object VlessBackend {
     private const val TAG = "VlessBackend"
     const val MTU = 1500
+
+    init {
+        // Everything that touches the core goes through this object, so this
+        // is where a caller in the wrong process is stopped: here, loudly and
+        // by name, instead of by a SIGSEGV with no tombstone at some later
+        // WireGuard connect. See [VlessIpc].
+        check(VlessIpc.inCoreProcess()) {
+            "VlessBackend reached from process '${VlessIpc.processName()}'. The Xray core may " +
+                "only load in '${VlessIpc.CORE_PROCESS_SUFFIX}'; the plugin's side is VlessClient."
+        }
+    }
 
     /**
      * Where clients address DNS. Not a public resolver: Android's Private DNS,
@@ -68,43 +80,66 @@ object VlessBackend {
     @Volatile
     private var appContext: Context? = null
 
-    @Volatile
-    private var lastUp = 0L
-
-    @Volatile
-    private var lastDown = 0L
+    /**
+     * Held across a status write and its broadcast.
+     *
+     * Transitions come from the lifecycle thread and announcements from a
+     * binder thread. Unordered, the later broadcast can carry the older
+     * status, and the plugin keeps whichever arrives last: a teardown that
+     * ends on `disconnecting` there never ends at all.
+     */
+    private val publishLock = Any()
 
     val status: ConnectionStatus
         get() = _statusFlow.value
 
     /**
-     * Assigns and publishes in one step.
+     * Assigns and broadcasts in one step.
      *
-     * The plugin lives in another process now, so a status nothing broadcasts
-     * is a status it never sees. Every transition goes through here.
+     * The plugin lives in another process, so a status nothing broadcasts is
+     * a status it never sees. Every transition goes through here.
      */
-    private fun setStatus(next: ConnectionStatus) {
+    private fun setStatus(next: ConnectionStatus) = synchronized(publishLock) {
         _statusFlow.value = next
-        publish()
+        broadcast(next)
     }
 
     /**
-     * Sends the current state to the plugin's process.
+     * Repeats the status for a plugin that has just found this process.
      *
-     * Counters default to the last tick's rather than being queried here: a
-     * transition can land while Xray holds its package-wide mutex for a start
-     * or a stop, and this must not block on it.
+     * Only for a live session. `disconnected` is never news to a plugin that
+     * is asking, and to one whose connect is still on its way here it would be
+     * wrong: it would see its own start reported as already over.
      */
-    fun publish(up: Long = lastUp, down: Long = lastDown) {
-        lastUp = up
-        lastDown = down
+    fun announce() = synchronized(publishLock) {
+        val current = _statusFlow.value
+        if (current != ConnectionStatus.disconnected) {
+            broadcast(current)
+        }
+    }
+
+    private fun broadcast(status: ConnectionStatus) {
         val context = appContext ?: return
-        context.sendBroadcast(
-            VlessIpc.state(context)
-                .putExtra(VlessIpc.EXTRA_STATUS, _statusFlow.value.name)
-                .putExtra(VlessIpc.EXTRA_UPLOAD, up)
-                .putExtra(VlessIpc.EXTRA_DOWNLOAD, down),
-        )
+        context.sendBroadcast(VlessIpc.status(context, status))
+    }
+
+    /**
+     * What the plugin's process may call, handed out by the service's onBind.
+     *
+     * Owned here rather than by a service instance: the plugin watches this
+     * binder to learn that the process died, which no instance outlives.
+     */
+    val binder: IBinder = object : IVlessCore.Stub() {
+        override fun counters(): LongArray {
+            // An exception would not cross as one: the caller would be left
+            // reading an empty reply.
+            val (up, down) = runCatching { this@VlessBackend.counters() }.getOrDefault(0L to 0L)
+            return longArrayOf(up, down)
+        }
+
+        override fun announce() {
+            this@VlessBackend.announce()
+        }
     }
 
     /**
@@ -121,6 +156,10 @@ object VlessBackend {
         prepared: XrayConfigPreparer.Prepared,
         onResult: (Boolean) -> Unit,
     ) {
+        // Set here, by the side that accepted the session. Until this the
+        // plugin only assumes `connecting`, and a stop that arrives during the
+        // bring-up would find `disconnected` and skip `disconnecting`.
+        setStatus(ConnectionStatus.connecting)
         scope.launch {
             val started = startTunnel(host, prepared)
             withContext(Dispatchers.Main) { onResult(started) }
@@ -269,8 +308,7 @@ object VlessBackend {
      * hev bridge reports them. They measure the same flow; the difference is
      * the proxy framing.
      *
-     * Only this process can read them: the plugin receives them through
-     * [publish] rather than calling across the boundary on every poll.
+     * Only this process can read them; the plugin asks through [binder].
      */
     fun counters(): Pair<Long, Long> {
         if (!XRay.isRunning()) {

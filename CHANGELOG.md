@@ -1,3 +1,15 @@
+## 0.4.1
+
+* Android runs the Xray core in its own process, `:vless`. The core and
+  wireguard-go each carry a Go runtime, and two in one process is unsupported
+  upstream (golang/go#65050): in a host that ships both, connecting WireGuard
+  after VLESS had run killed the app with a SIGSEGV that left no tombstone,
+  because Go replaces Android's crash handler. Apple was never affected, as
+  each tunnel already has its own extension process there. The Dart API is
+  unchanged.
+* The host process is told at once when the tunnel's process is killed, rather
+  than going on reporting `connected` for a tunnel that no longer exists.
+
 ## 0.4.0
 
 * Windows support. The tunnel runs in a helper process, `vless_core.exe`,

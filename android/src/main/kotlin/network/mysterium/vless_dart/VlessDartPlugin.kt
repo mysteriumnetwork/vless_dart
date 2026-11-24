@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 
 class VlessDartPlugin :
@@ -55,9 +56,8 @@ class VlessDartPlugin :
         // after a detach would silently start no collector and swallow every
         // method call launched into it.
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        // The tunnel runs in `:vless`; this listens for the state it
-        // broadcasts. Nothing here may reach the core directly -- see
-        // [VlessIpc] for why.
+        // The tunnel runs in `:vless`. Nothing here may reach the core
+        // directly -- see [VlessIpc] for why.
         VlessClient.attach(context)
         scope.launch {
             VlessClient.statusFlow.collect { broadcaster.send(it) }
@@ -67,7 +67,6 @@ class VlessDartPlugin :
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
-        VlessClient.detach(context)
         // Stops the status collector; without this a re-attach adds a second
         // one against a broadcaster the first no longer feeds.
         scope.cancel()
@@ -79,9 +78,14 @@ class VlessDartPlugin :
             // declares its service in the manifest and needs neither.
             "initialize" -> result.success(null)
             "status" -> result.success(VlessClient.status.name)
-            // Served from the last broadcast rather than the core, so this is
-            // a cheap local read now and needs no thread of its own.
-            "tunnelStatistics" -> result.success(VlessClient.statisticsJson())
+            // Off the main thread: the counters are a call into the core's
+            // process, which takes the same package-wide mutex Xray holds for
+            // the whole of a start or stop, and the caller polls them on a
+            // timer while connected.
+            "tunnelStatistics" -> scope.launch {
+                val stats = withContext(Dispatchers.IO) { VlessClient.statisticsJson() }
+                result.success(stats)
+            }
             "checkTunnelConfiguration" -> result.success(hasConsent())
             "setupTunnel" -> requestConsent(result)
             "connect" -> connect(call, result)

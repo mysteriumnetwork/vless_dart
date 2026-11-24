@@ -1,28 +1,41 @@
 package network.mysterium.vless_dart
 
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.ServiceConnection
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.RemoteException
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
  * The plugin's half of the tunnel, in the app's main process.
  *
- * Holds no Xray state: the core runs in `:vless` (see [VlessIpc]), so the
- * status and counters here are the last values that process broadcast.
+ * Holds no Xray state: the core runs in `:vless` (see [VlessIpc]). The status
+ * here is the last one that process broadcast, corrected by the one thing a
+ * broadcast cannot report, which is the process dying.
  *
- * This file must never reference an `XRay.*` class, directly or through
+ * This file must never reference an `XRay` class, directly or through
  * [VlessBackend]. Touching one loads the core's Go runtime into the main
  * process, which is exactly the crash the split exists to prevent.
  */
@@ -30,14 +43,17 @@ object VlessClient {
     private const val TAG = "VlessClient"
 
     /**
-     * One connect at a time, and never on the main thread: the check below is
-     * read-then-write, and the resolution either side of it blocks. The
-     * backend used to give this for free with its own single-thread
-     * dispatcher, before connect() moved over here.
+     * One connect at a time, and never on the main thread: the status check
+     * in it is read-then-write, and the resolution beside it blocks. Teardown
+     * commands queue here too, so one can never overtake the start it is
+     * meant to stop.
      */
     private val lifecycle = Executors.newSingleThreadExecutor { r ->
         Thread(r, "vless-client")
     }.asCoroutineDispatcher()
+
+    private val scope = CoroutineScope(SupervisorJob() + lifecycle)
+    private val main = Handler(Looper.getMainLooper())
 
     private val _statusFlow = MutableStateFlow(ConnectionStatus.disconnected)
     val statusFlow: StateFlow<ConnectionStatus> = _statusFlow.asStateFlow()
@@ -45,45 +61,152 @@ object VlessClient {
     val status: ConnectionStatus
         get() = _statusFlow.value
 
-    @Volatile
-    private var upload = 0L
+    /** Counted so a connect still resolving can tell a teardown overtook it. */
+    private val teardowns = AtomicInteger()
+
+    /** Main thread only, like everything about the binding. */
+    private var appContext: Context? = null
+    private var bound = false
 
     @Volatile
-    private var download = 0L
+    private var link: Link? = null
 
-    private var registered = false
+    /** A bound core, and the watch on the process that hosts it. */
+    private class Link(val core: IVlessCore, val binder: IBinder) : IBinder.DeathRecipient {
+        // Delivered on a binder thread.
+        override fun binderDied() {
+            main.post { onCoreDied(this) }
+        }
+    }
 
-    private val stateReceiver = object : BroadcastReceiver() {
+    private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val name = intent?.getStringExtra(VlessIpc.EXTRA_STATUS) ?: return
-            upload = intent.getLongExtra(VlessIpc.EXTRA_UPLOAD, 0L)
-            download = intent.getLongExtra(VlessIpc.EXTRA_DOWNLOAD, 0L)
-            _statusFlow.value = VlessIpc.statusOf(name)
+            val next = VlessIpc.statusOf(name)
+            _statusFlow.value = next
+            if (next != ConnectionStatus.disconnected) {
+                ensureLinked()
+            }
+        }
+    }
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            binder ?: return
+            if (link?.binder !== binder) {
+                val fresh = Link(IVlessCore.Stub.asInterface(binder), binder)
+                try {
+                    binder.linkToDeath(fresh, 0)
+                } catch (e: RemoteException) {
+                    lost("core died before it could be watched")
+                    return
+                }
+                link = fresh
+                Log.i(TAG, "core linked")
+            }
+            // A tunnel can outlive this process and be up before anything
+            // here has heard of it. The core answers only if one is, so a
+            // session still starting is never told it is disconnected.
+            try {
+                link?.core?.announce()
+            } catch (e: RemoteException) {
+                Log.w(TAG, "announce", e)
+            }
+        }
+
+        /**
+         * Nothing to do. An orderly stop reports itself by broadcast and the
+         * death watch covers a killed process, while acting here as well
+         * would declare `disconnected` ahead of a teardown still in progress.
+         */
+        override fun onServiceDisconnected(name: ComponentName?) = Unit
+
+        override fun onBindingDied(name: ComponentName?) {
+            // The service instance is gone and this binding with it: it will
+            // never connect again, and the next session needs one that can.
+            appContext?.let(::bind)
+            if (link?.binder?.isBinderAlive != true) {
+                // No process left to broadcast the end of whatever was
+                // starting, as when the service dies before it ever binds.
+                lost("service gone with no core to report it")
+            }
         }
     }
 
     /**
-     * Starts listening for state from `:vless`.
+     * Wires this process to the core's. Once per process, never undone.
      *
-     * The service outlives the engine, so a tunnel may already be up when the
-     * plugin attaches. It republishes on every notification tick, so the
-     * status here converges within a couple of seconds either way.
+     * Not tied to the engine: the tunnel outlives it, and a status change
+     * missed while detached would be believed until the next one. The
+     * binding uses no BIND_AUTO_CREATE, so it neither creates the service nor
+     * keeps it alive; it connects when one is running, and [ensureLinked]
+     * covers the case where the system has stopped honouring it.
      */
     fun attach(context: Context) {
-        if (registered) {
+        if (appContext != null) {
             return
         }
-        VlessIpc.registerStateReceiver(context.applicationContext, stateReceiver)
-        registered = true
+        val app = context.applicationContext
+        appContext = app
+        ContextCompat.registerReceiver(
+            app,
+            statusReceiver,
+            IntentFilter(VlessIpc.ACTION_STATUS),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        bind(app)
     }
 
-    fun detach(context: Context) {
-        if (!registered) {
+    private fun bind(context: Context) {
+        if (bound) {
+            runCatching { context.unbindService(connection) }
+        }
+        bound = runCatching {
+            context.bindService(VlessIpc.command(context, VlessIpc.ACTION_BIND), connection, 0)
+        }.getOrDefault(false)
+        if (!bound) {
+            Log.w(TAG, "could not bind the core; its death will go unnoticed")
+        }
+    }
+
+    /**
+     * Binds again when a core is running and nothing here is linked to it.
+     *
+     * The standing binding is not enough on its own. When the core's process
+     * dies under a running service, the system can drop the binding's record
+     * and leave the connection registered, so the next process is never
+     * handed over: no counters, and no death watch for that session. A status
+     * means a core is up right now, and binding to a running service is the
+     * one case that connects on the spot.
+     */
+    private fun ensureLinked() {
+        if (link?.binder?.isBinderAlive == true) {
             return
         }
-        runCatching { context.applicationContext.unregisterReceiver(stateReceiver) }
-            .onFailure { Log.w(TAG, "unregisterReceiver", it) }
-        registered = false
+        appContext?.let(::bind)
+    }
+
+    private fun onCoreDied(dead: Link) {
+        if (link !== dead) {
+            return
+        }
+        link = null
+        lost("core process died")
+    }
+
+    /**
+     * The tunnel is gone and nothing is left to say so.
+     *
+     * Its descriptor died with the process, so traffic is already leaving
+     * outside it. Reporting `connected` until some later resync would tell the
+     * user they are protected when they are not.
+     */
+    private fun lost(reason: String) {
+        if (status == ConnectionStatus.disconnected) {
+            return
+        }
+        Log.w(TAG, "tunnel lost: $reason")
+        _statusFlow.value = ConnectionStatus.disconnected
     }
 
     /**
@@ -94,10 +217,11 @@ object VlessClient {
      * this reaches the core.
      */
     suspend fun connect(context: Context, rawConfig: String) = withContext(lifecycle) {
+        val teardownsBefore = teardowns.get()
         check(VpnService.prepare(context) == null) { "VPN permission has not been granted" }
-        // One session at a time, as before the split. The check is against the
-        // last broadcast state, which the optimistic `connecting` below keeps
-        // honest between a connect and the service's first republish.
+        // One session at a time. Checked against the last broadcast, which
+        // the `connecting` below keeps honest until the core confirms it; the
+        // service checks again, since only it can know for certain.
         check(status == ConnectionStatus.disconnected) {
             "a tunnel is already ${status.name}, disconnect first"
         }
@@ -111,6 +235,11 @@ object VlessClient {
             ?.hostAddress
             ?: throw IllegalStateException("cannot resolve ${prepared.serverAddress} to IPv4")
         XrayConfigPreparer.pinServerAddress(prepared.config, resolved)
+
+        // Resolution can take seconds, and a disconnect during it found
+        // nothing to stop. It still has to win, or the tunnel comes up after
+        // the caller was told it would not.
+        check(teardowns.get() == teardownsBefore) { "connect cancelled by a disconnect" }
 
         _statusFlow.value = ConnectionStatus.connecting
 
@@ -140,32 +269,46 @@ object VlessClient {
     /**
      * Asks `:vless` to tear down. Safe to call when nothing is running.
      *
-     * Guarded by the cached status rather than sent unconditionally: starting
-     * the service only to stop it would post a foreground notification and
-     * arm Android's startForeground deadline for no reason.
+     * Counted at once, so a connect still resolving gives up, and sent from
+     * the queue that connect runs on, so it lands after any start already
+     * issued. Skipped when nothing is up: starting the service only to stop it
+     * would post a notification and arm the startForeground deadline for
+     * nothing.
      */
     fun disconnect(context: Context) {
-        if (status == ConnectionStatus.disconnected) {
-            return
+        teardowns.incrementAndGet()
+        val app = context.applicationContext
+        scope.launch {
+            if (status == ConnectionStatus.disconnected) {
+                return@launch
+            }
+            runCatching { app.startService(VlessIpc.command(app, VlessIpc.ACTION_DISCONNECT)) }
+                .onFailure { Log.w(TAG, "disconnect command", it) }
         }
-        runCatching { context.startService(VlessIpc.command(context, VlessIpc.ACTION_DISCONNECT)) }
-            .onFailure { Log.w(TAG, "disconnect command", it) }
     }
 
     /**
      * Cumulative counters as the Dart `tunnelStatistics` expects.
      *
-     * Served from the last broadcast instead of querying the core, which is
-     * now a process away. The service republishes every two seconds, the same
-     * cadence the caller polls at.
+     * A call into the core's process, which takes the mutex Xray holds for
+     * the whole of a start or stop, so never from the main thread.
      */
     fun statisticsJson(): String {
         if (status != ConnectionStatus.connected) {
             return ""
         }
+        val core = link?.core ?: return ""
+        val counters = try {
+            core.counters()
+        } catch (e: RemoteException) {
+            null
+        }
+        if (counters == null || counters.size < 2) {
+            return ""
+        }
         return JSONObject()
-            .put("totalUpload", upload)
-            .put("totalDownload", download)
+            .put("totalUpload", counters[0])
+            .put("totalDownload", counters[1])
             .put("latestHandshake", 0)
             .toString()
     }

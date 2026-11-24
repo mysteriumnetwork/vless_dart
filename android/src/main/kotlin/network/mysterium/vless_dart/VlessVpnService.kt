@@ -2,6 +2,7 @@ package network.mysterium.vless_dart
 
 import android.content.Intent
 import android.net.VpnService
+import android.os.IBinder
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,9 @@ class VlessVpnService : VpnService() {
     private lateinit var notifications: NotificationHelper
     private var updateJob: Job? = null
     private var startedInForeground = false
+
+    /** Whether this instance has already been given its one session. */
+    private var sessionAccepted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -82,6 +86,18 @@ class VlessVpnService : VpnService() {
             return START_NOT_STICKY
         }
 
+        if (sessionAccepted) {
+            // The plugin only connects when it believes nothing is up, so
+            // this is one whose view of us is stale. Bringing it up would
+            // fail against the running core, and the cleanup for that failure
+            // would take the live tunnel down with it. Correct the view
+            // instead, and keep the tunnel.
+            Log.w(TAG, "connect while a session is live, ignoring")
+            VlessBackend.announce()
+            return START_STICKY
+        }
+        sessionAccepted = true
+
         // Asynchronous on purpose: this callback runs on the main thread
         // and the bring-up blocks for seconds.
         VlessBackend.startTunnelAsync(this, prepared) { started ->
@@ -105,8 +121,11 @@ class VlessVpnService : VpnService() {
             return null
         }
         val config = intent.getStringExtra(VlessIpc.EXTRA_CONFIG) ?: return null
+        // On the main thread of the tunnel's process: unparseable is a start
+        // with nothing to bring up, not a reason to take the process down.
+        val json = runCatching { JSONObject(config) }.getOrNull() ?: return null
         return XrayConfigPreparer.Prepared(
-            config = JSONObject(config),
+            config = json,
             socksPort = intent.getIntExtra(VlessIpc.EXTRA_SOCKS_PORT, 0),
             username = intent.getStringExtra(VlessIpc.EXTRA_USERNAME).orEmpty(),
             password = intent.getStringExtra(VlessIpc.EXTRA_PASSWORD).orEmpty(),
@@ -126,10 +145,6 @@ class VlessVpnService : VpnService() {
                     break
                 }
                 val (up, down) = VlessBackend.counters()
-                // Every tick, not only on change: the plugin's process has no
-                // other way to learn the counters, or to resync after it
-                // reattaches over a tunnel that is already up.
-                VlessBackend.publish(up, down)
                 if (status != lastStatus || up != lastUp || down != lastDown) {
                     notifications.notifySafely(notifications.build(status, up, down))
                     lastStatus = status
@@ -140,6 +155,13 @@ class VlessVpnService : VpnService() {
             }
         }
     }
+
+    /**
+     * Hands the plugin its binder on the core. Every other bind is the
+     * framework's, checking consent or tracking the tunnel it established.
+     */
+    override fun onBind(intent: Intent?): IBinder? =
+        if (intent?.action == VlessIpc.ACTION_BIND) VlessBackend.binder else super.onBind(intent)
 
     /** Called by the backend once the core is down. */
     fun shutdown() {
