@@ -368,9 +368,8 @@ class _StatusCard extends StatelessWidget {
                 const SizedBox(width: 12),
                 Text(
                   status.name,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(color: color, fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(color: color, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
