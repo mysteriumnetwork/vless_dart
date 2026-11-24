@@ -48,22 +48,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Flutter Version Management CLI
-        uses: flutter-actions/setup-fvm@v1.0
+      # setup-fvm is Linux and macOS only, so this job installs the SDK
+      # directly -- still the version .fvmrc pins, read from it rather than
+      # written out twice.
+      - name: Read the pinned Flutter version
+        id: pinned
+        shell: pwsh
+        run: |
+          $version = (Get-Content .fvmrc -Raw | ConvertFrom-Json).flutter
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: subosito/flutter-action@v2
         with:
-          version: 4.0.5
+          flutter-version: ${{ steps.pinned.outputs.version }}
+          channel: stable
+          cache: true
 
-      - name: Install Flutter SDK
-        run: echo yes | fvm use
-
-      - run: fvm flutter pub get
+      - run: flutter pub get
 
       # Builds the plugin as the app does, which also exercises the core
       # download and its SHA-256 pins. include_vless_dart_tests is set by the
       # example, so this configures the gtest target too.
       - name: Build the example
         working-directory: example
-        run: fvm flutter build windows --debug
+        run: flutter build windows --debug
 
       # The golden vector here is the only guard against the C++ and Go wire
       # encoders drifting apart, and it ran nowhere before this job.
