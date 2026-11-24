@@ -56,8 +56,11 @@ class VlessDartPlugin :
         // after a detach would silently start no collector and swallow every
         // method call launched into it.
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        // The tunnel runs in `:vless`. Nothing here may reach the core
+        // directly -- see [VlessIpc] for why.
+        VlessClient.attach(context)
         scope.launch {
-            VlessBackend.statusFlow.collect { broadcaster.send(it) }
+            VlessClient.statusFlow.collect { broadcaster.send(it) }
         }
     }
 
@@ -74,12 +77,13 @@ class VlessDartPlugin :
             // Apple needs an extension bundle id and a description; Android
             // declares its service in the manifest and needs neither.
             "initialize" -> result.success(null)
-            "status" -> result.success(VlessBackend.status.name)
-            // Off the main thread: the counters are Go calls that take the
-            // same package-wide mutex Xray holds for the whole of a start or
-            // stop, and the caller polls them on a timer while connected.
+            "status" -> result.success(VlessClient.status.name)
+            // Off the main thread: the counters are a call into the core's
+            // process, which takes the same package-wide mutex Xray holds for
+            // the whole of a start or stop, and the caller polls them on a
+            // timer while connected.
             "tunnelStatistics" -> scope.launch {
-                val stats = withContext(Dispatchers.IO) { VlessBackend.statisticsJson() }
+                val stats = withContext(Dispatchers.IO) { VlessClient.statisticsJson() }
                 result.success(stats)
             }
             "checkTunnelConfiguration" -> result.success(hasConsent())
@@ -88,7 +92,7 @@ class VlessDartPlugin :
             // Android keeps no persistent profile: consent is granted to the
             // app and revoked from system settings, never by us.
             "disconnect", "removeTunnelConfiguration" -> {
-                VlessBackend.disconnect()
+                VlessClient.disconnect(context)
                 result.success(null)
             }
             else -> result.notImplemented()
@@ -107,7 +111,7 @@ class VlessDartPlugin :
         }
         scope.launch {
             try {
-                VlessBackend.connect(context, config)
+                VlessClient.connect(context, config)
                 result.success(null)
             } catch (e: Exception) {
                 Log.e(TAG, "connect failed", e)

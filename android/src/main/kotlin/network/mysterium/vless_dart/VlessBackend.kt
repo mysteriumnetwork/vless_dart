@@ -3,13 +3,9 @@ package network.mysterium.vless_dart
 import XRay.Protector
 import XRay.XRay
 import android.content.Context
-import android.content.Intent
-import android.net.VpnService
-import android.os.Build
+import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import java.net.Inet4Address
-import java.net.InetAddress
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,19 +16,32 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 /**
- * Owns the Xray core and the tun2socks bridge for the whole process.
+ * Owns the Xray core and the tun2socks bridge, inside the `:vless` process.
  *
  * A singleton because both are process-wide globals in Go: starting a second
  * instance fails rather than running alongside the first. The service can also
  * be recreated by the system without the plugin ever attaching, so state
  * cannot live in either of them.
+ *
+ * Unreachable from the app's main process, and nothing there may make it
+ * reachable -- see [VlessIpc]. The plugin's half is [VlessClient].
  */
 object VlessBackend {
     private const val TAG = "VlessBackend"
     const val MTU = 1500
+
+    init {
+        // Everything that touches the core goes through this object, so this
+        // is where a caller in the wrong process is stopped: here, loudly and
+        // by name, instead of by a SIGSEGV with no tombstone at some later
+        // WireGuard connect. See [VlessIpc].
+        check(VlessIpc.inCoreProcess()) {
+            "VlessBackend reached from process '${VlessIpc.processName()}'. The Xray core may " +
+                "only load in '${VlessIpc.CORE_PROCESS_SUFFIX}'; the plugin's side is VlessClient."
+        }
+    }
 
     /**
      * Where clients address DNS. Not a public resolver: Android's Private DNS,
@@ -64,57 +73,72 @@ object VlessBackend {
     private val _statusFlow = MutableStateFlow(ConnectionStatus.disconnected)
     val statusFlow: StateFlow<ConnectionStatus> = _statusFlow.asStateFlow()
 
-    /** Set by [connect], consumed by the service once it is running. */
-    @Volatile
-    private var pending: XrayConfigPreparer.Prepared? = null
-
     @Volatile
     private var service: VlessVpnService? = null
+
+    /** Set by the service, which is the only way into this process. */
+    @Volatile
+    private var appContext: Context? = null
+
+    /**
+     * Held across a status write and its broadcast.
+     *
+     * Transitions come from the lifecycle thread and announcements from a
+     * binder thread. Unordered, the later broadcast can carry the older
+     * status, and the plugin keeps whichever arrives last: a teardown that
+     * ends on `disconnecting` there never ends at all.
+     */
+    private val publishLock = Any()
 
     val status: ConnectionStatus
         get() = _statusFlow.value
 
     /**
-     * Prepares the config and asks the service to start.
+     * Assigns and broadcasts in one step.
      *
-     * Resolution happens here, before any tunnel exists, so the lookup cannot
-     * route into it.
+     * The plugin lives in another process, so a status nothing broadcasts is
+     * a status it never sees. Every transition goes through here.
      */
-    suspend fun connect(context: Context, rawConfig: String) = withContext(lifecycle) {
-        check(VpnService.prepare(context) == null) { "VPN permission has not been granted" }
-        // One session at a time. A second connect would otherwise overwrite
-        // `pending` before the first service consumed it, so one start takes
-        // the other's config and the other finds none and stops the service.
-        check(status == ConnectionStatus.disconnected) {
-            "a tunnel is already ${status.name}, disconnect first"
+    private fun setStatus(next: ConnectionStatus) = synchronized(publishLock) {
+        _statusFlow.value = next
+        broadcast(next)
+    }
+
+    /**
+     * Repeats the status for a plugin that has just found this process.
+     *
+     * Only for a live session. `disconnected` is never news to a plugin that
+     * is asking, and to one whose connect is still on its way here it would be
+     * wrong: it would see its own start reported as already over.
+     */
+    fun announce() = synchronized(publishLock) {
+        val current = _statusFlow.value
+        if (current != ConnectionStatus.disconnected) {
+            broadcast(current)
+        }
+    }
+
+    private fun broadcast(status: ConnectionStatus) {
+        val context = appContext ?: return
+        context.sendBroadcast(VlessIpc.status(context, status))
+    }
+
+    /**
+     * What the plugin's process may call, handed out by the service's onBind.
+     *
+     * Owned here rather than by a service instance: the plugin watches this
+     * binder to learn that the process died, which no instance outlives.
+     */
+    val binder: IBinder = object : IVlessCore.Stub() {
+        override fun counters(): LongArray {
+            // An exception would not cross as one: the caller would be left
+            // reading an empty reply.
+            val (up, down) = runCatching { this@VlessBackend.counters() }.getOrDefault(0L to 0L)
+            return longArrayOf(up, down)
         }
 
-        val prepared = XrayConfigPreparer.prepare(rawConfig)
-        // IPv4 only: getByName returns whichever family the resolver sorts
-        // first, so a dual-stack server would pin an AAAA the exits cannot use.
-        val resolved = InetAddress.getAllByName(prepared.serverAddress)
-            .filterIsInstance<Inet4Address>()
-            .firstOrNull()
-            ?.hostAddress
-            ?: throw IllegalStateException("cannot resolve ${prepared.serverAddress} to IPv4")
-        XrayConfigPreparer.pinServerAddress(prepared.config, resolved)
-
-        pending = prepared
-        _statusFlow.value = ConnectionStatus.connecting
-
-        val intent = Intent(context, VlessVpnService::class.java)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        } catch (e: Exception) {
-            // The service never starts, so no teardown will ever run: without
-            // this the status is stranded at `connecting` for good.
-            pending = null
-            _statusFlow.value = ConnectionStatus.disconnected
-            throw e
+        override fun announce() {
+            this@VlessBackend.announce()
         }
     }
 
@@ -127,9 +151,17 @@ object VlessBackend {
      * for seconds, which is an ANR. Running here also puts start and stop on
      * the one thread, so a cancel mid-connect can no longer land between them.
      */
-    fun startTunnelAsync(host: VlessVpnService, onResult: (Boolean) -> Unit) {
+    fun startTunnelAsync(
+        host: VlessVpnService,
+        prepared: XrayConfigPreparer.Prepared,
+        onResult: (Boolean) -> Unit,
+    ) {
+        // Set here, by the side that accepted the session. Until this the
+        // plugin only assumes `connecting`, and a stop that arrives during the
+        // bring-up would find `disconnected` and skip `disconnecting`.
+        setStatus(ConnectionStatus.connecting)
         scope.launch {
-            val started = startTunnel(host)
+            val started = startTunnel(host, prepared)
             withContext(Dispatchers.Main) { onResult(started) }
         }
     }
@@ -138,13 +170,10 @@ object VlessBackend {
      * Brings the tunnel up inside the service. Called once the service is in
      * the foreground, so a failure here can still report through the channel.
      */
-    private fun startTunnel(host: VlessVpnService): Boolean {
-        val prepared = pending ?: run {
-            Log.w(TAG, "startTunnel with no prepared config")
-            return false
-        }
-        pending = null
-
+    private fun startTunnel(
+        host: VlessVpnService,
+        prepared: XrayConfigPreparer.Prepared,
+    ): Boolean {
         var fd = -1
         try {
             // IPv6 is captured rather than left out. An address family with
@@ -198,7 +227,7 @@ object VlessBackend {
                 throw e
             }
 
-            _statusFlow.value = ConnectionStatus.connected
+            setStatus(ConnectionStatus.connected)
             return true
         } catch (e: Exception) {
             Log.e(TAG, "failed to start tunnel", e)
@@ -206,7 +235,7 @@ object VlessBackend {
                 // Only reachable before the descriptor was handed to Go.
                 runCatching { ParcelFileDescriptor.adoptFd(fd).close() }
             }
-            _statusFlow.value = ConnectionStatus.disconnected
+            setStatus(ConnectionStatus.disconnected)
             return false
         }
     }
@@ -223,7 +252,7 @@ object VlessBackend {
      */
     private fun stopNow() {
         if (_statusFlow.value != ConnectionStatus.disconnected) {
-            _statusFlow.value = ConnectionStatus.disconnecting
+            setStatus(ConnectionStatus.disconnecting)
         }
         runCatching { XRay.stopTun2Socks() }.onFailure { Log.w(TAG, "stopTun2Socks", it) }
         runCatching { XRay.stop() }.onFailure { Log.w(TAG, "XRay.stop", it) }
@@ -235,8 +264,7 @@ object VlessBackend {
             // its way out and the stop calls have nothing left to act on.
             runCatching { host.shutdown() }.onFailure { Log.w(TAG, "shutdown", it) }
         }
-        pending = null
-        _statusFlow.value = ConnectionStatus.disconnected
+        setStatus(ConnectionStatus.disconnected)
     }
 
     /**
@@ -248,6 +276,7 @@ object VlessBackend {
      */
     fun onServiceCreated(host: VlessVpnService) {
         service = host
+        appContext = host.applicationContext
     }
 
     /** Called by the service when the system or the user stops it. */
@@ -273,15 +302,17 @@ object VlessBackend {
     }
 
     /**
-     * Cumulative counters as the JSON string `tunnelStatistics` expects.
+     * Cumulative proxy counters.
      *
      * Xray's own outbound counters are the source here, unlike Apple where the
      * hev bridge reports them. They measure the same flow; the difference is
      * the proxy framing.
+     *
+     * Only this process can read them; the plugin asks through [binder].
      */
-    fun statisticsJson(): String {
+    fun counters(): Pair<Long, Long> {
         if (!XRay.isRunning()) {
-            return ""
+            return 0L to 0L
         }
         var up = 0L
         var down = 0L
@@ -295,10 +326,6 @@ object VlessBackend {
                 }
             }
         }
-        return JSONObject()
-            .put("totalUpload", up)
-            .put("totalDownload", down)
-            .put("latestHandshake", 0)
-            .toString()
+        return up to down
     }
 }
