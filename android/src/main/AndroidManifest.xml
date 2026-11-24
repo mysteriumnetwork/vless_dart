@@ -14,11 +14,20 @@
 		  with no build-time warning. An app that needs a different
 		  foregroundServiceType can override it with tools:replace.
 		-->
+		<!--
+		  Its own process, not the host's. The Xray core is a Go runtime, and
+		  so is wireguard-go: two in one process is unsupported upstream
+		  (golang/go#65050), and the second one to run takes a SIGSEGV. Apple
+		  is immune only because each tunnel gets its own Network Extension
+		  process, which this mirrors. Nothing in the host process may touch an
+		  XRay class; see VlessIpc.
+		-->
 		<service
 			android:name="network.mysterium.vless_dart.VlessVpnService"
 			android:exported="false"
 			android:foregroundServiceType="systemExempted"
-			android:permission="android.permission.BIND_VPN_SERVICE">
+			android:permission="android.permission.BIND_VPN_SERVICE"
+			android:process=":vless">
 			<intent-filter>
 				<action android:name="android.net.VpnService" />
 			</intent-filter>

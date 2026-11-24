@@ -70,9 +70,21 @@ class VlessVpnService : VpnService() {
             }
         }
 
+        if (intent?.action == VlessIpc.ACTION_DISCONNECT) {
+            VlessBackend.disconnect()
+            return START_NOT_STICKY
+        }
+
+        val prepared = preparedFrom(intent) ?: run {
+            // A system-redelivered start, with no config left to bring up.
+            Log.w(TAG, "start with no prepared config, stopping")
+            VlessBackend.disconnect()
+            return START_NOT_STICKY
+        }
+
         // Asynchronous on purpose: this callback runs on the main thread
         // and the bring-up blocks for seconds.
-        VlessBackend.startTunnelAsync(this) { started ->
+        VlessBackend.startTunnelAsync(this, prepared) { started ->
             if (started) {
                 startNotificationLoop()
             } else {
@@ -80,6 +92,26 @@ class VlessVpnService : VpnService() {
             }
         }
         return START_STICKY
+    }
+
+    /**
+     * Rebuilds the prepared config from the start intent.
+     *
+     * It used to be handed over through a field on the backend; the plugin is
+     * in another process now, so it travels with the command instead.
+     */
+    private fun preparedFrom(intent: Intent?): XrayConfigPreparer.Prepared? {
+        if (intent?.action != VlessIpc.ACTION_CONNECT) {
+            return null
+        }
+        val config = intent.getStringExtra(VlessIpc.EXTRA_CONFIG) ?: return null
+        return XrayConfigPreparer.Prepared(
+            config = JSONObject(config),
+            socksPort = intent.getIntExtra(VlessIpc.EXTRA_SOCKS_PORT, 0),
+            username = intent.getStringExtra(VlessIpc.EXTRA_USERNAME).orEmpty(),
+            password = intent.getStringExtra(VlessIpc.EXTRA_PASSWORD).orEmpty(),
+            serverAddress = intent.getStringExtra(VlessIpc.EXTRA_SERVER).orEmpty(),
+        )
     }
 
     private fun startNotificationLoop() {
@@ -93,14 +125,11 @@ class VlessVpnService : VpnService() {
                 if (status == ConnectionStatus.disconnected) {
                     break
                 }
-                val stats = VlessBackend.statisticsJson()
-                var up = 0L
-                var down = 0L
-                if (stats.isNotEmpty()) {
-                    val parsed = JSONObject(stats)
-                    up = parsed.optLong("totalUpload")
-                    down = parsed.optLong("totalDownload")
-                }
+                val (up, down) = VlessBackend.counters()
+                // Every tick, not only on change: the plugin's process has no
+                // other way to learn the counters, or to resync after it
+                // reattaches over a tunnel that is already up.
+                VlessBackend.publish(up, down)
                 if (status != lastStatus || up != lastUp || down != lastDown) {
                     notifications.notifySafely(notifications.build(status, up, down))
                     lastStatus = status
