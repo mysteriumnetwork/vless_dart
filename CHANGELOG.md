@@ -1,3 +1,8 @@
+## 0.3.2
+
+* Build against Flutter 3.47.9 and Dart 3.13, matching the consuming app. No
+  behaviour change.
+
 ## 0.3.1
 
 * IPv6 no longer reaches the client as "connected, then closed". The core
