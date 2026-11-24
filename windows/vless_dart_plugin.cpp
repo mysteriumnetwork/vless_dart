@@ -318,6 +318,20 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
     return;
   }
 
+  if (event->second == "error") {
+    // The only route a start failure has. connect() resolves as soon as the
+    // start is requested, matching Android, and the status that follows is
+    // just "disconnected" -- which PublishStatus drops when it is already
+    // the current one, leaving the failure invisible.
+    const auto message = fields.find("message");
+    if (status_sink_) {
+      status_sink_->Error("core_error", message == fields.end()
+                                            ? "the core reported an error"
+                                            : message->second);
+    }
+    return;
+  }
+
   if (event->second == "stats") {
     const auto id = fields.find("id");
     if (id == fields.end()) {
