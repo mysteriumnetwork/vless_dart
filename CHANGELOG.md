@@ -1,3 +1,10 @@
+## 0.3.3
+
+* Pin the TLS ALPN to `http/1.1`. Xray's default offers `h2` first, and a
+  supernode that accepts it makes the WebSocket upgrade impossible: TLS
+  succeeds, the upgrade returns 400, and nothing is logged at warning level.
+  The tunnel reported connected while carrying no traffic at all.
+
 ## 0.3.2
 
 * Build against Flutter 3.47.9 and Dart 3.13, matching the consuming app. No
