@@ -100,9 +100,9 @@ void main() {
     expect(tags, contains('dns-out'));
 
     final rules = (config['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
-    final dnsRule =
-        rules.firstWhere((dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out')
-            as Map<String, dynamic>;
+    final dnsRule = rules.firstWhere(
+      (dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out',
+    ) as Map<String, dynamic>;
     expect(dnsRule['port'], 53);
   });
 
@@ -112,9 +112,9 @@ void main() {
     // them to a direct dial instead of handling them, so the real lookups would
     // leave the device in plaintext, outside the tunnel.
     final rules = (_build()['routing']! as Map<String, dynamic>)['rules']! as List<dynamic>;
-    final dnsRule =
-        rules.firstWhere((dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out')
-            as Map<String, dynamic>;
+    final dnsRule = rules.firstWhere(
+      (dynamic r) => (r as Map<String, dynamic>)['outboundTag'] == 'dns-out',
+    ) as Map<String, dynamic>;
     expect(dnsRule['inboundTag'], <String>['socks-in']);
   });
 
