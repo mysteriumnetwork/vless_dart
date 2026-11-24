@@ -82,7 +82,16 @@ abstract final class XrayConfig {
         'streamSettings': <String, dynamic>{
           'network': 'ws',
           'security': 'tls',
-          'tlsSettings': <String, dynamic>{'serverName': uri.sni, 'allowInsecure': false},
+          // ALPN is pinned. Xray's default offers h2 first, and a supernode
+          // that accepts it leaves the WebSocket upgrade impossible: the
+          // handshake succeeds, the upgrade returns 400, and nothing is
+          // logged at warning level, so the tunnel reports connected while
+          // carrying nothing.
+          'tlsSettings': <String, dynamic>{
+            'serverName': uri.sni,
+            'allowInsecure': false,
+            'alpn': <String>['http/1.1'],
+          },
           // `headers.Host` is deprecated upstream in favour of a top-level `host`.
           'wsSettings': <String, dynamic>{'path': uri.wsPath, 'host': uri.wsHost},
         },

@@ -156,6 +156,22 @@ void main() {
     expect((inbound['sniffing']! as Map<String, dynamic>)['routeOnly'], true);
   });
 
+  // The supernode accepts h2 when it is offered, and a WebSocket upgrade
+  // cannot be made over it: TLS succeeds, the upgrade 400s, and Xray says
+  // nothing at warning level, so the tunnel reports connected and carries
+  // nothing. Measured against a live exit on 2026-11-24.
+  test('pins ALPN to http/1.1 so the WebSocket upgrade is possible', () {
+    final config = _build();
+    final proxy = (config['outbounds']! as List<dynamic>).firstWhere(
+      (dynamic o) => (o as Map<String, dynamic>)['tag'] == 'proxy',
+    ) as Map<String, dynamic>;
+    final stream = proxy['streamSettings']! as Map<String, dynamic>;
+    final tls = stream['tlsSettings']! as Map<String, dynamic>;
+
+    expect(stream['network'], 'ws');
+    expect(tls['alpn'], <String>['http/1.1']);
+  });
+
   test('includes the direct, block and dns outbounds', () {
     final tags = (_build()['outbounds']! as List<dynamic>)
         .map((dynamic o) => (o as Map<String, dynamic>)['tag'])
