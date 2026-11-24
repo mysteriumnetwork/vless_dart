@@ -34,6 +34,16 @@ object VlessBackend {
     private const val TAG = "VlessBackend"
     const val MTU = 1500
 
+    /**
+     * Where clients address DNS. Not a public resolver: Android's Private DNS,
+     * opportunistic by default, probes the resolvers a network advertises for
+     * DoT and then queries port 853, which no port-53 rule can intercept, so
+     * AAAA reached the client. Nothing answers 853 here, so it falls back to
+     * cleartext 53, which dns-out does intercept. `.2` because `.1` is the
+     * tun's own address and would be answered locally instead of tunnelled.
+     */
+    private const val TUN_DNS = "198.18.0.2"
+
     /** Resolved through the proxy to prove the tunnel carries traffic. */
     private const val PROBE_DOMAIN = "cloudflare.com"
 
@@ -140,8 +150,8 @@ object VlessBackend {
             // IPv6 is captured rather than left out. An address family with
             // no route does not get dropped, it falls through to the physical
             // interface, which leaks the real address while the UI says
-            // connected. The exits are IPv4-only, so it is refused inside the
-            // tunnel instead, which is where the client can see it fail.
+            // connected. The exits are IPv4-only, so the core drops the frames
+            // before its TCP stack can answer them -- see ipv4only.go.
             val builder = host.Builder()
                 .setSession("Mysterium VLESS")
                 .setMtu(MTU)
@@ -149,8 +159,7 @@ object VlessBackend {
                 .addRoute("0.0.0.0", 0)
                 .addAddress("fd00:2::1", 64)
                 .addRoute("::", 0)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("1.0.0.1")
+                .addDnsServer(TUN_DNS)
 
             val descriptor = builder.establish()
                 ?: throw IllegalStateException("VpnService.establish returned null")
