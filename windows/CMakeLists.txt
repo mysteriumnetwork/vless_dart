@@ -16,7 +16,7 @@ set(PLUGIN_NAME "vless_dart_plugin")
 # release pins every platform to the same Xray-core build. Keep in lockstep
 # with xrayCoreTag in android/build.gradle and the url in vless-core's
 # Package.swift.
-set(XRAY_CORE_TAG "xray-v26.3.27-7")
+set(XRAY_CORE_TAG "xray-v26.3.27-8")
 set(XRAY_CORE_BASE
   "https://github.com/mysteriumnetwork/vless-core/releases/download/${XRAY_CORE_TAG}")
 
