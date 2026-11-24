@@ -122,13 +122,16 @@ LRESULT CALLBACK VlessDartPlugin::WakeWindowProc(HWND window, UINT message,
 }
 
 VlessDartPlugin::~VlessDartPlugin() {
+  // Stop first, window second. Stop joins the reader thread, so nothing can
+  // be appended after it returns -- and while the window still exists the
+  // reader posts to it rather than taking OnCoreLine's fallback, which would
+  // drain on the reader thread and touch channels during engine teardown.
+  // Whatever it posts is simply never dispatched.
+  core_.Stop();
   if (window_ != nullptr) {
     DestroyWindow(window_);
     window_ = nullptr;
   }
-  // Before the queue and the pending results go away: Stop joins the reader
-  // thread, so nothing can be appended after this returns.
-  core_.Stop();
 }
 
 void VlessDartPlugin::SetStatusSink(
@@ -318,20 +321,6 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
     return;
   }
 
-  if (event->second == "error") {
-    // The only route a start failure has. connect() resolves as soon as the
-    // start is requested, matching Android, and the status that follows is
-    // just "disconnected" -- which PublishStatus drops when it is already
-    // the current one, leaving the failure invisible.
-    const auto message = fields.find("message");
-    if (status_sink_) {
-      status_sink_->Error("core_error", message == fields.end()
-                                            ? "the core reported an error"
-                                            : message->second);
-    }
-    return;
-  }
-
   if (event->second == "stats") {
     const auto id = fields.find("id");
     if (id == fields.end()) {
@@ -356,19 +345,28 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
   }
 
   if (event->second == "error") {
-    const auto id = fields.find("id");
-    if (id == fields.end()) {
-      return;
-    }
-    const auto waiting = pending_.find(id->second);
-    if (waiting == pending_.end()) {
-      return;
-    }
     const auto message = fields.find("message");
-    waiting->second->Error(
-        "err_core",
-        message == fields.end() ? std::string("core error") : message->second);
-    pending_.erase(waiting);
+    const std::string text =
+        message == fields.end() ? std::string("core error") : message->second;
+
+    // An id means a request failed, and its caller is the one waiting.
+    const auto id = fields.find("id");
+    if (id != fields.end()) {
+      const auto waiting = pending_.find(id->second);
+      if (waiting != pending_.end()) {
+        waiting->second->Error("err_core", text);
+        pending_.erase(waiting);
+        return;
+      }
+    }
+
+    // Otherwise nobody is: connect() resolves as soon as the start is
+    // requested, matching Android, and the status that follows is only
+    // "disconnected" -- which PublishStatus drops when it already is that.
+    // Without this the failure has no route out at all.
+    if (status_sink_) {
+      status_sink_->Error("core_error", text);
+    }
   }
 }
 
