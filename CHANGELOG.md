@@ -7,6 +7,17 @@
   configured explicitly, because Windows has no `VpnService.Builder` or
   `NEPacketTunnelProvider` to do it.
 
+## 0.3.1
+
+* IPv6 no longer reaches the client as "connected, then closed". The core
+  drops it before its TCP stack can answer, so a browser falls back to IPv4
+  instead of giving up on the site. Dual-stack pages failed only on a cold
+  socket pool, which is why they broke in incognito and worked in a warm tab.
+* Android is told to query a resolver inside the tunnel rather than
+  `1.1.1.1`. Private DNS, opportunistic by default, was validating the
+  advertised resolvers for DNS-over-TLS and then querying port 853, which no
+  port-53 rule intercepts, so AAAA records reached the client anyway.
+
 ## 0.2.0
 
 * `connect` takes an optional `dnsAddress`, which becomes the resolver that
