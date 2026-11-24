@@ -324,12 +324,14 @@ void VlessDartPlugin::Drain() {
       Dispatch(fields);
       continue;
     }
-    // Not a protocol line. The core's stderr shares this pipe, so this is the
-    // shape a Go panic arrives in -- the very failure running out of process
-    // exists to survive. Dropping it silently leaves no record at all.
-    if (status_sink_) {
-      status_sink_->Error("core_output", line);
-    }
+    // Not a protocol line, and deliberately not surfaced. Xray's own logger
+    // writes to this same stdout, so a routine warning -- the WebSocket
+    // transport deprecation notice arrives on every connect -- would reach
+    // the app as a failure. It is traced in OnCoreLine either way.
+    //
+    // A Go panic also arrives this way and is worth surfacing, but telling
+    // the two apart needs the core's stderr on a pipe of its own rather than
+    // a guess about the text.
   }
 }
 
