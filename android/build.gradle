@@ -3,7 +3,7 @@ version '1.0-SNAPSHOT'
 
 // The core is published as XRay.aar beside XRay.xcframework, so one release
 // pins Android and Apple to the same Xray-core build.
-ext.xrayCoreTag = 'xray-v26.3.27-6'
+ext.xrayCoreTag = 'xray-v26.3.27-8'
 ext.xrayCoreUrl = "https://github.com/mysteriumnetwork/vless-core/releases/download/${xrayCoreTag}/XRay.aar"
 
 allprojects {
