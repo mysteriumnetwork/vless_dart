@@ -58,7 +58,7 @@ class VlessDartPlugin : public flutter::Plugin {
   static std::wstring CoreExecutablePath();
 
   flutter::PluginRegistrarWindows* registrar_ = nullptr;
-  int64_t window_proc_id_ = -1;
+  int window_proc_id_ = -1;
   HWND window_ = nullptr;
   UINT wake_message_ = 0;
 

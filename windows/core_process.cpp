@@ -175,7 +175,8 @@ void CoreProcess::ReadLoop() {
 
   while (true) {
     DWORD read = 0;
-    if (!ReadFile(stdout_read_, buffer, sizeof(buffer), &read, nullptr) ||
+    if (!ReadFile(stdout_read_, buffer, static_cast<DWORD>(sizeof(buffer)), &read,
+                  nullptr) ||
         read == 0) {
       break;
     }
