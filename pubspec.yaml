@@ -1,6 +1,6 @@
 name: vless_dart
-description: "VLESS (Xray) client for Flutter — iOS and macOS via NetworkExtension, Android via VpnService, with status streaming and live traffic stats."
-version: 0.3.3
+description: "VLESS (Xray) client for Flutter — iOS and macOS via NetworkExtension, Android via VpnService, Windows via wintun, with status streaming and live traffic stats."
+version: 0.4.0
 homepage: https://github.com/mysteriumnetwork/vless_dart
 repository: https://github.com/mysteriumnetwork/vless_dart
 
@@ -30,3 +30,5 @@ flutter:
       macos:
         pluginClass: VlessDartPlugin
         sharedDarwinSource: true
+      windows:
+        pluginClass: VlessDartPluginCApi

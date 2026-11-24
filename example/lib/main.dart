@@ -86,22 +86,30 @@ class _HomePageState extends State<_HomePage> {
         providerBundleIdentifier: _providerBundleIdentifier,
         localizedDescription: _localizedDescription,
       );
-      _statusSub = _vpn.statusStream().listen((ConnectionStatus status) {
-        debugPrint('[EXAMPLE] status -> ${status.name}');
-        if (!mounted) {
-          return;
-        }
-        setState(() => _status = status);
-        if (status == ConnectionStatus.connected) {
-          _startStatsPolling();
-          if (_autoConnect && !_autoCheckDone) {
-            _autoCheckDone = true;
-            unawaited(_autoCheck());
+      _statusSub = _vpn.statusStream().listen(
+        onError: (Object error) {
+          // The core's own failure text; without this it is an unhandled zone
+          // error and the reason never reaches the console.
+          debugPrint('[EXAMPLE] core error: $error');
+          _report('Core error: $error', isError: true);
+        },
+        (ConnectionStatus status) {
+          debugPrint('[EXAMPLE] status -> ${status.name}');
+          if (!mounted) {
+            return;
           }
-        } else {
-          _stopStatsPolling();
-        }
-      });
+          setState(() => _status = status);
+          if (status == ConnectionStatus.connected) {
+            _startStatsPolling();
+            if (_autoConnect && !_autoCheckDone) {
+              _autoCheckDone = true;
+              unawaited(_autoCheck());
+            }
+          } else {
+            _stopStatsPolling();
+          }
+        },
+      );
       final current = await _vpn.getVPNStatus();
       setState(() => _status = current);
       if (current == ConnectionStatus.connected) {
