@@ -34,7 +34,17 @@ class CoreProcess {
 
   // Closes stdin so the core tears the tunnel down on its own, waits briefly,
   // then terminates. Safe to call when nothing is running.
-  void Stop();
+  // [grace_ms] is how long the core is given to unwind the tunnel after its
+  // stdin closes, before it is terminated. Shutdown can afford the full wait;
+  // a restart cannot, because it runs on the platform thread.
+  void Stop(DWORD grace_ms = kDefaultShutdownGraceMs);
+
+  // Long enough for the core to remove its routes, adapter and DNS policy.
+  static constexpr DWORD kDefaultShutdownGraceMs = 5000;
+  // A restart only has to get the old process out of the way. Anything it
+  // fails to clean up the next core repairs: it clears a stale DNS policy at
+  // startup, and the adapter dies with the process.
+  static constexpr DWORD kRestartGraceMs = 1000;
 
   bool Running() const { return running_.load(); }
 

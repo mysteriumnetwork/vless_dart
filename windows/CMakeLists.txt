@@ -24,6 +24,18 @@ set(XRAY_CORE_BASE
 # download sitting under the same filename.
 set(CORE_CACHE "${CMAKE_CURRENT_BINARY_DIR}/xray/${XRAY_CORE_TAG}")
 
+# SHA-256 of each published asset, bumped with XRAY_CORE_TAG.
+#
+# A release asset can be replaced under an existing tag, and the cache key is
+# only the tag, so without this a swapped file is fetched once and shipped
+# forever. The app links with /MANIFESTUAC:level='requireAdministrator' and
+# spawns vless_core.exe as a child, so that file runs with an elevated token:
+# it is the last thing that should be taken on trust from a URL.
+set(XRAY_CORE_SHA256_vless_core.exe
+  "4c176033b2163826c19adfb70db9465ce93fef541f68262c05d5f5ccb5dde8c8")
+set(XRAY_CORE_SHA256_wintun.dll
+  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce")
+
 # A local build wins, so the core can be iterated on without publishing a
 # release. Mirrors VLESS_LOCAL_CORE in android/build.gradle.
 set(LOCAL_CORE_DIRS
@@ -48,8 +60,14 @@ function(resolve_core_asset name out_var)
     # Downloaded beside the cache entry and moved in only once the transfer
     # succeeds: a half-written file still satisfies EXISTS, so a dropped
     # connection would leave every later build shipping a truncated core.
+    set(expected "${XRAY_CORE_SHA256_${name}}")
+    if(NOT expected)
+      message(FATAL_ERROR
+        "vless_dart: no SHA-256 recorded for ${name}; add XRAY_CORE_SHA256_${name}")
+    endif()
     file(DOWNLOAD "${XRAY_CORE_BASE}/${name}" "${cached}.part"
       STATUS download_status
+      EXPECTED_HASH "SHA256=${expected}"
       SHOW_PROGRESS
       TLS_VERIFY ON)
     list(GET download_status 0 download_code)

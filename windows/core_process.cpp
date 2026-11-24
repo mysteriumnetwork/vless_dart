@@ -6,11 +6,6 @@ namespace vless_dart {
 
 namespace {
 
-// Long enough for the core to unwind routes and close the adapter, short
-// enough that a wedged core cannot hold app shutdown open for long. Only
-// reached when the app is closing; a disconnect does not wait on this.
-constexpr DWORD kShutdownTimeoutMs = 5000;
-
 // Room for several commands without the writer ever having to wait on the
 // core to drain the pipe.
 constexpr DWORD kPipeBufferBytes = 1024 * 1024;
@@ -37,7 +32,7 @@ bool CoreProcess::Start(const std::wstring& exe_path, LineHandler on_line,
   // and its handles open. Assigning over a joinable std::thread terminates the
   // process, so reap it before starting another.
   if (reader_.joinable()) {
-    Stop();
+    Stop(kRestartGraceMs);
   }
 
   SECURITY_ATTRIBUTES inheritable = {};
@@ -120,7 +115,7 @@ bool CoreProcess::Start(const std::wstring& exe_path, LineHandler on_line,
   return true;
 }
 
-void CoreProcess::Stop() {
+void CoreProcess::Stop(DWORD grace_ms) {
   running_.store(false);
 
   // Closing stdin is the core's cue to unwind the tunnel. Terminating it
@@ -134,7 +129,7 @@ void CoreProcess::Stop() {
   }
 
   if (process_ != nullptr) {
-    if (WaitForSingleObject(process_, kShutdownTimeoutMs) != WAIT_OBJECT_0) {
+    if (WaitForSingleObject(process_, grace_ms) != WAIT_OBJECT_0) {
       TerminateProcess(process_, 1);
       WaitForSingleObject(process_, 1000);
     }

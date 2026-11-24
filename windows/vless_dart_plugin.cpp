@@ -17,6 +17,21 @@ constexpr wchar_t kCoreExecutable[] = L"vless_core.exe";
 // Registered once per process; a second engine reuses it.
 constexpr wchar_t kWakeWindowClass[] = L"VlessDartWakeWindow";
 
+// A counter the wire did not carry, or carried as anything but digits, would
+// otherwise be interpolated straight into the JSON and make it unparseable --
+// which Dart swallows, reporting zero bytes with no diagnostic anywhere.
+std::string Counter(Fields::const_iterator found, Fields::const_iterator end) {
+  if (found == end || found->second.empty()) {
+    return "0";
+  }
+  for (const char c : found->second) {
+    if (c < '0' || c > '9') {
+      return "0";
+    }
+  }
+  return found->second;
+}
+
 const flutter::EncodableValue* ValueOrNull(const flutter::EncodableMap& map,
                                            const char* key) {
   const auto it = map.find(flutter::EncodableValue(key));
@@ -158,7 +173,11 @@ void VlessDartPlugin::HandleMethodCall(
   }
 
   if (method == "checkTunnelConfiguration") {
-    result->Success(flutter::EncodableValue(false));
+    // Truthfully, not a constant false. The app takes setupTunnel on every
+    // connect when this says no, and that path can call
+    // _resolveExistingConnection, whose failure handler disconnects a tunnel
+    // that is already up -- tearing one down mid-connect on a reconnect.
+    result->Success(flutter::EncodableValue(core_.Running()));
     return;
   }
 
@@ -303,6 +322,13 @@ void VlessDartPlugin::Drain() {
     Fields fields;
     if (Decode(line, &fields)) {
       Dispatch(fields);
+      continue;
+    }
+    // Not a protocol line. The core's stderr shares this pipe, so this is the
+    // shape a Go panic arrives in -- the very failure running out of process
+    // exists to survive. Dropping it silently leaves no record at all.
+    if (status_sink_) {
+      status_sink_->Error("core_output", line);
     }
   }
 }
@@ -316,6 +342,13 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
   if (event->second == "status") {
     const auto status = fields.find("status");
     if (status != fields.end()) {
+      // Nothing in flight can still be answered once the tunnel is down, and
+      // the core is deliberately left running after a disconnect -- so
+      // without this a core that stops replying leaks one MethodResult per
+      // stats poll, about one a second, for the rest of the session.
+      if (status->second == "disconnected") {
+        FailPending("the tunnel stopped");
+      }
       PublishStatus(status->second);
     }
     return;
@@ -334,11 +367,10 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
     const auto downlink = fields.find("downlink");
     // latestHandshake has no meaning for VLESS and footprintBytes is an iOS
     // concern, so both are left out and default on the Dart side.
-    const std::string json =
-        "{\"totalUpload\":" +
-        (uplink == fields.end() ? std::string("0") : uplink->second) +
-        ",\"totalDownload\":" +
-        (downlink == fields.end() ? std::string("0") : downlink->second) + "}";
+    const std::string json = "{\"totalUpload\":" +
+                             Counter(uplink, fields.end()) +
+                             ",\"totalDownload\":" +
+                             Counter(downlink, fields.end()) + "}";
     waiting->second->Success(flutter::EncodableValue(json));
     pending_.erase(waiting);
     return;

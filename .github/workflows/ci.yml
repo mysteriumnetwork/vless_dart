@@ -1,7 +1,9 @@
 name: CI
 
-# Dart only. The Xray core and the tunnel module live in
-# github.com/mysteriumnetwork/vless-apple and are tested there.
+# The Xray core lives in github.com/mysteriumnetwork/vless-core and is tested
+# there. The Windows job exists because nothing else compiles the plugin's C++:
+# analysis_options.yaml excludes windows/, so a build break there is invisible
+# until someone opens the project on Windows by hand.
 #
 # The plugin's own Swift tests need a signed macOS build — the example that
 # hosts them carries a NetworkExtension entitlement — so they stay local behind
@@ -41,3 +43,36 @@ jobs:
       - name: Test
         run: fvm flutter test
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter Version Management CLI
+        uses: flutter-actions/setup-fvm@v1.0
+        with:
+          version: 4.0.5
+
+      - name: Install Flutter SDK
+        run: echo yes | fvm use
+
+      - run: fvm flutter pub get
+
+      # Builds the plugin as the app does, which also exercises the core
+      # download and its SHA-256 pins. include_vless_dart_tests is set by the
+      # example, so this configures the gtest target too.
+      - name: Build the example
+        working-directory: example
+        run: fvm flutter build windows --debug
+
+      # The golden vector here is the only guard against the C++ and Go wire
+      # encoders drifting apart, and it ran nowhere before this job.
+      - name: Wire protocol tests
+        working-directory: example
+        shell: pwsh
+        run: |
+          $runner = Get-ChildItem -Path build\windows\x64 -Recurse `
+            -Filter vless_dart_test.exe | Select-Object -First 1
+          if (-not $runner) { throw "vless_dart_test.exe was not built" }
+          & $runner.FullName
+          if ($LASTEXITCODE -ne 0) { throw "wire tests failed" }

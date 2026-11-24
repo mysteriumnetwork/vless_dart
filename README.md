@@ -1,8 +1,14 @@
 # vless_dart
 
-VLESS client for Flutter on **iOS and macOS**. The control plane; the tunnel
-engine lives in
-[vless-apple](https://github.com/mysteriumnetwork/vless-apple).
+VLESS client for Flutter on **iOS, macOS, Android and Windows**. The control
+plane; the tunnel engine lives in
+[vless-core](https://github.com/mysteriumnetwork/vless-core).
+
+On Windows the core runs as a child process, `vless_core.exe`, which needs
+administrator rights to create the wintun adapter and write routes. The app's
+own runner requests elevation; the example here does not, so run it from an
+elevated terminal or connect fails with "the core must run elevated to create
+a tunnel adapter".
 
 ## What it supports
 
