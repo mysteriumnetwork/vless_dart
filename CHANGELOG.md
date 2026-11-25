@@ -1,3 +1,27 @@
+## 0.4.2
+
+* The Xray access log is off. With a log section present and no `access` in
+  it, Xray wrote a line per connection to stdout, naming its destination:
+  into logcat on Android and into the debug output on Windows.
+* Windows: a DNS policy rule left by a core that was killed is cleared when
+  the app starts, when the core dies under a tunnel, and when the plugin shuts
+  down. The rule points every lookup on the machine at a resolver inside the
+  tunnel, and until now only the next connect removed a leftover -- which an
+  app that must reach its API by name could never get to.
+* Windows: a core that exits on its own is reported on the status stream with
+  its exit code, instead of as a bare `disconnected`, or as nothing at all
+  when it died before answering a start.
+* Windows: the core is launched by full path or not at all, inherits only its
+  two pipes rather than every inheritable handle in the app, and is stopped
+  together with anything it started. Its raw output, which includes each
+  connection the bridge carries, reaches the debug output in debug builds
+  only.
+* Android: the core download is checked against a pinned SHA-256, as the
+  Windows and Apple ones already were.
+* CI builds the Android, iOS and macOS sides and runs the Kotlin and Swift
+  tests, which ran nowhere before. The Windows job also tests the process
+  handling around the core.
+
 ## 0.4.1
 
 * Android runs the Xray core in its own process, `:vless`. The core and
