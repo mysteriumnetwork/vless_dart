@@ -3,14 +3,14 @@ version '1.0-SNAPSHOT'
 
 // The core is published as XRay.aar beside XRay.xcframework, so one release
 // pins Android and Apple to the same Xray-core build.
-ext.xrayCoreTag = 'xray-v26.3.27-9'
+ext.xrayCoreTag = 'xray-v26.3.27-10'
 ext.xrayCoreUrl = "https://github.com/mysteriumnetwork/vless-core/releases/download/${xrayCoreTag}/XRay.aar"
 // SHA-256 of that asset, bumped with the tag. A release asset can be replaced
 // under an existing tag, and this file is native code that carries every
 // packet the user sends: not something to take on trust from a URL. Windows
 // and Apple pin theirs the same way, in windows/CMakeLists.txt and in
 // vless-core's Package.swift.
-ext.xrayCoreSha256 = '460709493cdcd7601f1d49aa7cc12a3388fba51064f1a77b0872e7a242034944'
+ext.xrayCoreSha256 = 'c7d7e6c7832f05f323fdcf32c386b56863a106fd0b24f31ec1ca84a4a056d8b7'
 
 allprojects {
     repositories {

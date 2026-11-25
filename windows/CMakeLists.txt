@@ -16,7 +16,7 @@ set(PLUGIN_NAME "vless_dart_plugin")
 # release pins every platform to the same Xray-core build. Keep in lockstep
 # with xrayCoreTag in android/build.gradle and the url in vless-core's
 # Package.swift.
-set(XRAY_CORE_TAG "xray-v26.3.27-9")
+set(XRAY_CORE_TAG "xray-v26.3.27-10")
 set(XRAY_CORE_BASE
   "https://github.com/mysteriumnetwork/vless-core/releases/download/${XRAY_CORE_TAG}")
 
@@ -32,7 +32,7 @@ set(CORE_CACHE "${CMAKE_CURRENT_BINARY_DIR}/xray/${XRAY_CORE_TAG}")
 # spawns vless_core.exe as a child, so that file runs with an elevated token:
 # it is the last thing that should be taken on trust from a URL.
 set(XRAY_CORE_SHA256_vless_core.exe
-  "4c176033b2163826c19adfb70db9465ce93fef541f68262c05d5f5ccb5dde8c8")
+  "ad5e377e68989170d0505056b2db72c0bf31c9bf6820cb1cea9a4f34100dc4b9")
 set(XRAY_CORE_SHA256_wintun.dll
   "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce")
 

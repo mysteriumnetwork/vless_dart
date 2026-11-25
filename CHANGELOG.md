@@ -22,6 +22,13 @@
   only.
 * Android: the core download is checked against a pinned SHA-256, as the
   Windows and Apple ones already were.
+* The core is `xray-v26.3.27-10`. On Android and Windows its tun bridge no
+  longer logs each connection's destination. On Windows its DNS policy rule
+  is installed only once the tunnel carries traffic and does not survive a
+  restart; a connect in flight gives way to a disconnect or to the app
+  closing instead of running its eight-second check to the end; the tunnel
+  keeps working across a change of network; and a tunnel whose adapter has
+  gone is reported as an error and `disconnected`.
 * CI builds the Android, iOS and macOS sides and runs the Kotlin and Swift
   tests, which ran nowhere before. The Windows job also tests the process
   handling around the core.
