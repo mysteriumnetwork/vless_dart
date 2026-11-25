@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "dns_policy.h"
+
 namespace vless_dart {
 
 namespace {
@@ -81,6 +83,12 @@ void VlessDartPlugin::RegisterWithRegistrar(
 // The registrar is not retained: the channels are set up in
 // RegisterWithRegistrar and the wake window is the plugin's own.
 VlessDartPlugin::VlessDartPlugin(flutter::PluginRegistrarWindows*) {
+  // First thing, on every start of the app: if the last run ended with the
+  // core killed -- the app crashed, was ended from Task Manager, or the
+  // machine went down with a tunnel up -- the machine has had no DNS since.
+  // No core is running yet, so whatever rule is there is a leftover.
+  RemoveDnsRule(kCoreDnsRule);
+
   // A system-wide unique id rather than WM_APP + n, which another plugin
   // hooking the same window is free to use for something else.
   wake_message_ = RegisterWindowMessageW(L"VlessDartCoreEvent");
@@ -143,6 +151,10 @@ VlessDartPlugin::~VlessDartPlugin() {
   // drain on the reader thread and touch channels during engine teardown.
   // Whatever it posts is simply never dispatched.
   core_.Stop();
+  // A core that unwound in time has taken its rule with it and this finds
+  // nothing. One that had to be terminated has not: quitting while a connect
+  // is still probing a slow exit is enough to outlast the grace period.
+  RemoveDnsRule(kCoreDnsRule);
   if (window_ != nullptr) {
     DestroyWindow(window_);
     window_ = nullptr;
@@ -235,6 +247,8 @@ void VlessDartPlugin::Connect(
     return;
   }
 
+  awaiting_start_ = true;
+
   // Resolves once the tunnel has been requested to start, not once it is up,
   // matching Android. Failures arrive on the status stream.
   result->Success(flutter::EncodableValue());
@@ -277,11 +291,15 @@ bool VlessDartPlugin::SendCommand(const Fields& fields) {
 }
 
 void VlessDartPlugin::OnCoreLine(const std::string& line) {
-  // Traced because a connect failure has nowhere else to go: connect resolves
-  // as soon as the start is requested, matching Android, so the reason only
-  // ever reaches the core's error event. Safe to trace — the core's output
-  // never carries the config, and so never the session's VLESS id.
-  OutputDebugStringA(("vless_dart <- " + (line.empty() ? "<core exited>" : line) + "\n").c_str());
+#ifdef _DEBUG
+  // Debug builds only. This is everything the core writes, not just the
+  // protocol, and the libraries inside it log each connection they carry
+  // with its destination. Debug output can be read by any process in the
+  // session, so in a release build that would be a browsing record on offer.
+  OutputDebugStringA(
+      ("vless_dart <- " + (line.empty() ? "<core exited>" : line) + "\n")
+          .c_str());
+#endif
 
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -315,19 +333,48 @@ void VlessDartPlugin::Drain() {
     if (line.empty()) {
       // The core exited. Anything still waiting on it never gets an answer.
       FailPending("the core exited");
+      // It is only ever stopped by the destructor, after which nothing
+      // drains, so reaching here means it went on its own: a crash, or
+      // something killed it. If that took a tunnel with it, or a start that
+      // was never answered, "disconnected" alone gives no reason -- and for
+      // the unanswered start it is not even an event, being the status
+      // already.
+      if ((status_ != "disconnected" || awaiting_start_) && status_sink_) {
+        status_sink_->Error("core_exited",
+                            "the core exited unexpectedly with code " +
+                                std::to_string(core_.ExitCode()));
+      }
+      awaiting_start_ = false;
+      // It was not asked to stop, so it did not unwind. Its adapter and
+      // routes went with the process; its DNS rule did not, and until it is
+      // gone nothing on the machine resolves. Skipped if a new core is
+      // already up: that one cleared the leftover itself as it started, and
+      // any rule there now is its own.
+      if (!core_.Running()) {
+        RemoveDnsRule(kCoreDnsRule);
+      }
       PublishStatus("disconnected");
       continue;
     }
 
     Fields fields;
     if (Decode(line, &fields)) {
+#ifndef _DEBUG
+      // The protocol's own events are safe to trace anywhere and are what a
+      // field report needs: status changes and the core's error text. Not
+      // the counters, which arrive once a second.
+      const auto event = fields.find("event");
+      if (event != fields.end() && event->second != "stats") {
+        OutputDebugStringA(("vless_dart <- " + line + "\n").c_str());
+      }
+#endif
       Dispatch(fields);
       continue;
     }
     // Not a protocol line, and deliberately not surfaced. Xray's own logger
     // writes to this same stdout, so a routine warning -- the WebSocket
     // transport deprecation notice arrives on every connect -- would reach
-    // the app as a failure. It is traced in OnCoreLine either way.
+    // the app as a failure. Debug builds trace it in OnCoreLine.
     //
     // A Go panic also arrives this way and is worth surfacing, but telling
     // the two apart needs the core's stderr on a pipe of its own rather than
@@ -344,6 +391,7 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
   if (event->second == "status") {
     const auto status = fields.find("status");
     if (status != fields.end()) {
+      awaiting_start_ = false;
       // Nothing in flight can still be answered once the tunnel is down, and
       // the core is deliberately left running after a disconnect -- so
       // without this a core that stops replying leaks one MethodResult per
@@ -394,6 +442,8 @@ void VlessDartPlugin::Dispatch(const Fields& fields) {
       }
     }
 
+    awaiting_start_ = false;
+
     // Otherwise nobody is: connect() resolves as soon as the start is
     // requested, matching Android, and the status that follows is only
     // "disconnected" -- which PublishStatus drops when it already is that.
@@ -422,14 +472,7 @@ void VlessDartPlugin::FailPending(const std::string& message) {
 }
 
 std::wstring VlessDartPlugin::CoreExecutablePath() {
-  wchar_t module[MAX_PATH] = {};
-  const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
-  std::wstring path(module, length);
-  const size_t slash = path.find_last_of(L'\\');
-  if (slash == std::wstring::npos) {
-    return kCoreExecutable;
-  }
-  return path.substr(0, slash + 1) + kCoreExecutable;
+  return SiblingPath(ModulePath(), kCoreExecutable);
 }
 
 }  // namespace vless_dart

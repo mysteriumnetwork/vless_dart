@@ -94,6 +94,8 @@ list(APPEND PLUGIN_SOURCES
   "vless_dart_plugin.h"
   "core_process.cpp"
   "core_process.h"
+  "dns_policy.cpp"
+  "dns_policy.h"
   "wire.cpp"
   "wire.h"
 )
@@ -144,15 +146,28 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# Only the wire protocol: the rest of the plugin needs a Flutter engine and a
-# live core process, which belong in the integration tests rather than here.
+# The wire protocol, the process handling around the core, and the cleanup
+# after one. The plugin class itself needs a Flutter engine, which belongs in
+# integration tests.
 add_executable(${TEST_RUNNER}
   test/wire_test.cpp
+  test/core_process_test.cpp
+  test/dns_policy_test.cpp
   "wire.cpp"
+  "core_process.cpp"
+  "dns_policy.cpp"
 )
 apply_standard_settings(${TEST_RUNNER})
 target_include_directories(${TEST_RUNNER} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${TEST_RUNNER} PRIVATE gtest_main gmock)
+
+# What core_process_test.cpp launches in place of vless_core.exe. The real one
+# needs an elevated session and a network to do anything at all. Built into
+# the runner's directory, which is where the test looks for it.
+set(TEST_HELPER "${PROJECT_NAME}_test_helper")
+add_executable(${TEST_HELPER} test/core_process_test_helper.cpp)
+apply_standard_settings(${TEST_HELPER})
+add_dependencies(${TEST_RUNNER} ${TEST_HELPER})
 
 include(GoogleTest)
 gtest_discover_tests(${TEST_RUNNER})

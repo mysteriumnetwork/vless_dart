@@ -10,12 +10,71 @@ namespace {
 // core to drain the pipe.
 constexpr DWORD kPipeBufferBytes = 1024 * 1024;
 
+// Far past any line of the protocol: a status, a pair of counters, an error
+// message. Output with no newline in it is not the protocol, and without a
+// bound it would be held in memory for as long as it kept coming.
+constexpr size_t kMaxLineBytes = 64 * 1024;
+
+// How long the reader waits, once the core's output has ended, for the
+// process itself to finish so its exit code can be read.
+constexpr DWORD kExitCodeWaitMs = 2000;
+
+// The longest path Windows accepts, in characters.
+constexpr size_t kMaxPathChars = 32768;
+
 std::string LastErrorMessage(const char* what) {
   return std::string(what) + " failed with " +
          std::to_string(static_cast<unsigned long>(GetLastError()));
 }
 
+// Null if the job cannot be made to kill on close, since a job without that
+// limit is no use here.
+HANDLE CreateKillOnCloseJob() {
+  HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  if (job == nullptr) {
+    return nullptr;
+  }
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
+                               sizeof(limits))) {
+    CloseHandle(job);
+    return nullptr;
+  }
+  return job;
+}
+
 }  // namespace
+
+std::wstring SiblingPath(const std::wstring& module_path,
+                         const std::wstring& name) {
+  const size_t slash = module_path.find_last_of(L"\\/");
+  if (slash == std::wstring::npos) {
+    return std::wstring();
+  }
+  return module_path.substr(0, slash + 1) + name;
+}
+
+std::wstring ModulePath() {
+  // GetModuleFileNameW truncates a path that does not fit and still reports
+  // success, and a truncated path is a different path. Grow until it fits.
+  std::wstring path(MAX_PATH, L'\0');
+  while (true) {
+    const DWORD length = GetModuleFileNameW(
+        nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0) {
+      return std::wstring();
+    }
+    if (length < path.size()) {
+      path.resize(length);
+      return path;
+    }
+    if (path.size() >= kMaxPathChars) {
+      return std::wstring();
+    }
+    path.resize(path.size() * 2);
+  }
+}
 
 CoreProcess::~CoreProcess() {
   Stop();
@@ -25,6 +84,10 @@ bool CoreProcess::Start(const std::wstring& exe_path, LineHandler on_line,
                         std::string* error) {
   if (running_.load()) {
     *error = "core is already running";
+    return false;
+  }
+  if (exe_path.empty()) {
+    *error = "the core's location could not be resolved";
     return false;
   }
 
@@ -62,48 +125,82 @@ bool CoreProcess::Start(const std::wstring& exe_path, LineHandler on_line,
   SetHandleInformation(stdin_write_, HANDLE_FLAG_INHERIT, 0);
   SetHandleInformation(stdout_read_, HANDLE_FLAG_INHERIT, 0);
 
-  job_ = CreateJobObjectW(nullptr, nullptr);
-  if (job_ != nullptr) {
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
-    limits.BasicLimitInformation.LimitFlags =
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits,
-                            sizeof(limits));
+  job_ = CreateKillOnCloseJob();
+
+  // The child gets these two handles and nothing else. Asking only for
+  // inheritance hands it every inheritable handle in this process, whoever
+  // opened it: another plugin's pipe to its own child, say, which then never
+  // reports EOF because an elevated core it has never heard of holds a copy.
+  HANDLE inherited[] = {stdin_read, stdout_write};
+  SIZE_T attribute_bytes = 0;
+  InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_bytes);
+  std::vector<unsigned char> attribute_storage(attribute_bytes);
+  const auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
+      attribute_storage.data());
+  if (attribute_bytes == 0 ||
+      !InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes)) {
+    *error = LastErrorMessage("InitializeProcThreadAttributeList");
+    CloseHandle(stdin_read);
+    CloseHandle(stdout_write);
+    CloseHandles();
+    return false;
   }
 
-  STARTUPINFOW startup = {};
-  startup.cb = sizeof(startup);
-  startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-  startup.wShowWindow = SW_HIDE;
-  startup.hStdInput = stdin_read;
-  startup.hStdOutput = stdout_write;
-  startup.hStdError = stdout_write;
-
-  // CreateProcessW may write to the command line buffer, so it cannot be a
-  // string literal or the exe path's own storage.
-  std::vector<wchar_t> command_line(exe_path.begin(), exe_path.end());
-  command_line.push_back(L'\0');
-
   PROCESS_INFORMATION process = {};
-  const BOOL created = CreateProcessW(
-      exe_path.c_str(), command_line.data(), nullptr, nullptr, TRUE,
-      CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup,
-      &process);
+  BOOL created = FALSE;
+  if (!UpdateProcThreadAttribute(attributes, 0,
+                                 PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+                                 sizeof(inherited), nullptr, nullptr)) {
+    *error = LastErrorMessage("UpdateProcThreadAttribute");
+  } else {
+    STARTUPINFOEXW startup = {};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup.StartupInfo.wShowWindow = SW_HIDE;
+    startup.StartupInfo.hStdInput = stdin_read;
+    startup.StartupInfo.hStdOutput = stdout_write;
+    startup.StartupInfo.hStdError = stdout_write;
+    startup.lpAttributeList = attributes;
+
+    // Quoted, because the child splits this on spaces to find its own name
+    // and the app installs under "Program Files". A buffer of its own,
+    // because CreateProcessW may write to it.
+    const std::wstring quoted = L"\"" + exe_path + L"\"";
+    std::vector<wchar_t> command_line(quoted.begin(), quoted.end());
+    command_line.push_back(L'\0');
+
+    created = CreateProcessW(
+        exe_path.c_str(), command_line.data(), nullptr, nullptr, TRUE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
+        nullptr, nullptr, &startup.StartupInfo, &process);
+    if (!created) {
+      // Read before anything below can replace it.
+      *error = LastErrorMessage("CreateProcess");
+    }
+  }
+  DeleteProcThreadAttributeList(attributes);
 
   // The child owns its ends now, whether or not the launch worked.
   CloseHandle(stdin_read);
   CloseHandle(stdout_write);
 
   if (!created) {
-    *error = LastErrorMessage("CreateProcess");
     CloseHandles();
     return false;
   }
 
   // Assigned while suspended so the core cannot outlive the job even if it
   // exits or spawns before we get here.
-  if (job_ != nullptr) {
-    AssignProcessToJobObject(job_, process.hProcess);
+  if (job_ == nullptr || !AssignProcessToJobObject(job_, process.hProcess)) {
+    // Not fatal. The core still unwinds when its stdin closes, and that
+    // happens when this process dies too. What is lost is the backstop for a
+    // core too stuck to notice, so it is worth a line in the debugger.
+    OutputDebugStringA(
+        "vless_dart: the core is not in a kill-on-close job\n");
+    if (job_ != nullptr) {
+      CloseHandle(job_);
+      job_ = nullptr;
+    }
   }
   ResumeThread(process.hThread);
   CloseHandle(process.hThread);
@@ -133,6 +230,15 @@ void CoreProcess::Stop(DWORD grace_ms) {
       TerminateProcess(process_, 1);
       WaitForSingleObject(process_, 1000);
     }
+  }
+
+  // Whatever the core started goes with it, and before the join rather than
+  // when the job handle closes after it. A child of the core inherits its
+  // stdout, and the reader below only finishes once the last copy of that
+  // pipe is closed: left alive, such a child would hang this thread, which is
+  // the platform thread.
+  if (job_ != nullptr) {
+    TerminateJobObject(job_, 1);
   }
 
   // Joined unconditionally rather than behind the running_ flag: the core can
@@ -191,12 +297,25 @@ void CoreProcess::ReadLoop() {
       newline = pending.find('\n', start);
     }
     pending.erase(0, start);
+    if (pending.size() > kMaxLineBytes) {
+      // Dropped, and the rest of it will be when its newline arrives: no
+      // protocol line is this long, so nothing that parses is lost.
+      pending.clear();
+    }
   }
 
   // Cleared here, not only in Stop: the core exiting on its own is the whole
   // reason it runs out of process, and leaving the flag set would make every
   // later connect fail to write to a pipe nothing is reading.
   running_.store(false);
+
+  // The pipe closes a moment before the process is gone, so give it that
+  // moment. process_ is only replaced after this thread has been joined.
+  DWORD code = STILL_ACTIVE;
+  if (WaitForSingleObject(process_, kExitCodeWaitMs) == WAIT_OBJECT_0) {
+    GetExitCodeProcess(process_, &code);
+  }
+  exit_code_.store(code);
 
   // Empty line means the core is gone, so whoever is waiting on it stops
   // waiting rather than hanging on a reply that will never come.

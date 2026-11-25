@@ -72,6 +72,8 @@ class VlessDartPlugin : public flutter::Plugin {
   // Touched only on the platform thread, where every channel call is made.
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> status_sink_;
   std::string status_ = "disconnected";
+  // A start has been sent and the core has not yet said anything about it.
+  bool awaiting_start_ = false;
   std::map<std::string,
            std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>>
       pending_;
