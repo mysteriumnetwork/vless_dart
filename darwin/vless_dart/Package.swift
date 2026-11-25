@@ -2,7 +2,7 @@
 
 import PackageDescription
 
-// Control plane only. The data plane lives in github.com/mysteriumnetwork/vless-apple
+// Control plane only. The data plane lives in github.com/mysteriumnetwork/vless-core
 // and is linked by the packet tunnel extension: declaring it here too collides in the
 // package graph, since Flutter pulls this plugin into the app automatically.
 let package = Package(

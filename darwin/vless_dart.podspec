@@ -10,7 +10,7 @@ VLESS/Xray client for iOS and macOS.
   s.author = { "Mysterium Network" => "mysterium-dev@mysterium.network" }
 
   # Control plane only, matching Package.swift. The data plane — Xray core,
-  # tun2socks and the packet tunnel provider — lives in vless-apple and is
+  # tun2socks and the packet tunnel provider — lives in vless-core and is
   # linked by the extension target, never by the app: a second Go runtime
   # beside WireGuard's does not link.
   s.source = { :path => "." }

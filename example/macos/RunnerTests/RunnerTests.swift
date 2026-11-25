@@ -5,7 +5,7 @@ import XCTest
 
 /// The plugin's own Swift — the control plane.
 ///
-/// The tunnel-support module moved to vless-apple, which tests it with
+/// The tunnel-support module moved to vless-core, which tests it with
 /// `swift test` and no signing. Mirroring that suite here only let the copy
 /// drift from the one CI actually runs.
 final class VPNUtilsTests: XCTestCase {

@@ -65,7 +65,7 @@ class PacketTunnelProvider: VlessPacketTunnelProvider {}
 ```
 
 Add the **`vless-tunnel-support`** product from
-[vless-apple](https://github.com/mysteriumnetwork/vless-apple) to that extension
+[vless-core](https://github.com/mysteriumnetwork/vless-core) to that extension
 target (not to the app target — the app gets `vless-dart` through Flutter).
 
 The loopback SOCKS inbound binds a free port and gets fresh credentials per
@@ -81,12 +81,12 @@ v4-only through the config's `queryStrategy` instead.
 ## The tunnel engine
 
 The Xray core, the tun2socks bridge and `VlessPacketTunnelProvider` live in
-[vless-apple](https://github.com/mysteriumnetwork/vless-apple), along with the
+[vless-core](https://github.com/mysteriumnetwork/vless-core), along with the
 Swift suite and the instructions for building and publishing a core.
 
 This package is deliberately free of them. It is pulled into the app process by
 Flutter, and linking the core there would put a second Go runtime alongside
-WireGuard's — which fails to link — besides colliding with vless-apple's targets
+WireGuard's — which fails to link — besides colliding with vless-core's targets
 in the same package graph.
 
 ## Development
@@ -127,4 +127,4 @@ Windows session, and is still checked by hand.
 
 MIT; see [LICENSE](LICENSE). The third-party components the tunnel engine
 builds on are attributed in
-[vless-apple](https://github.com/mysteriumnetwork/vless-apple)'s NOTICE.
+[vless-core](https://github.com/mysteriumnetwork/vless-core)'s NOTICE.
