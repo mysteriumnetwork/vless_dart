@@ -5,6 +5,12 @@ version '1.0-SNAPSHOT'
 // pins Android and Apple to the same Xray-core build.
 ext.xrayCoreTag = 'xray-v26.3.27-9'
 ext.xrayCoreUrl = "https://github.com/mysteriumnetwork/vless-core/releases/download/${xrayCoreTag}/XRay.aar"
+// SHA-256 of that asset, bumped with the tag. A release asset can be replaced
+// under an existing tag, and this file is native code that carries every
+// packet the user sends: not something to take on trust from a URL. Windows
+// and Apple pin theirs the same way, in windows/CMakeLists.txt and in
+// vless-core's Package.swift.
+ext.xrayCoreSha256 = '460709493cdcd7601f1d49aa7cc12a3388fba51064f1a77b0872e7a242034944'
 
 allprojects {
     repositories {
@@ -30,6 +36,12 @@ def localCore = [
         "${projectDir}/../../vless-apple/Artifacts/XRay.aar",
 ].findAll { it }.collect { file(it) }.find { it.exists() }
 
+def sha256Of = { File target ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    target.eachByte(1 << 16) { buffer, read -> digest.update(buffer, 0, read) }
+    digest.digest().encodeHex().toString()
+}
+
 // An aar cannot be nested inside another aar, so the core is unpacked and its
 // two halves are fed in separately: the classes as a local jar, which AGP does
 // package for consumers, and the .so files as a jniLibs source directory.
@@ -38,6 +50,7 @@ def unpackXrayCore = tasks.register('unpackXrayCore') {
     // locally rebuilt core, so a warm build directory keeps linking the old
     // one while this file claims the new one.
     inputs.property('tag', xrayCoreTag)
+    inputs.property('sha256', xrayCoreSha256)
     inputs.property('localCore', localCore ? "${localCore}@${localCore.lastModified()}" : '')
     outputs.dir(xrayUnpacked)
     doLast {
@@ -65,6 +78,18 @@ def unpackXrayCore = tasks.register('unpackXrayCore') {
                     xrayAar.bytes = partial.bytes
                     delete partial
                 }
+            }
+            // Checked on every unpack, not only after a download: an entry
+            // cached before the pin existed, or altered since, is the same
+            // unknown file. A local build above is the developer's own and is
+            // not held to it.
+            def actual = sha256Of(xrayAar)
+            if (actual != xrayCoreSha256) {
+                delete xrayAar
+                throw new GradleException(
+                        "vless_dart: ${xrayCoreUrl} has SHA-256 ${actual}, expected " +
+                                "${xrayCoreSha256}. Update xrayCoreSha256 with the tag, " +
+                                "or find out why the asset changed.")
             }
             source = xrayAar
         }
