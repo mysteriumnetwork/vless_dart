@@ -40,7 +40,11 @@ abstract final class XrayConfig {
     String queryStrategy = ipv4Only,
     List<String> dnsServers = defaultDnsServers,
   }) => <String, dynamic>{
-    'log': <String, dynamic>{'loglevel': 'warning'},
+    // `access` has to be named. With a log section present and no value for
+    // it, Xray writes one line per connection to stdout -- source, destination
+    // and route -- which lands in logcat on Android and in the debug output
+    // on Windows. A VPN client has no business keeping that list.
+    'log': <String, dynamic>{'loglevel': 'warning', 'access': 'none'},
     // Answers DNS inside the tunnel so [queryStrategy] applies. Without this
     // the query goes straight to the resolver and AAAA comes back regardless.
     'dns': <String, dynamic>{'servers': _resolvers(dnsServers), 'queryStrategy': queryStrategy},

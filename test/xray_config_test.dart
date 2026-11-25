@@ -172,6 +172,14 @@ void main() {
     expect(tls['alpn'], <String>['http/1.1']);
   });
 
+  test('keeps no record of where connections go', () {
+    // A log section that leaves `access` out turns Xray's access log on, to
+    // stdout: a line per connection, naming its destination.
+    final log = _build()['log']! as Map<String, dynamic>;
+    expect(log['access'], 'none');
+    expect(log['loglevel'], 'warning');
+  });
+
   test('includes the direct, block and dns outbounds', () {
     final tags = (_build()['outbounds']! as List<dynamic>)
         .map((dynamic o) => (o as Map<String, dynamic>)['tag'])
