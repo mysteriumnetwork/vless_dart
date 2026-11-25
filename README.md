@@ -92,7 +92,8 @@ in the same package graph.
 ## Development
 
 ```sh
-make check           # format + analyze + the Dart and Swift suites
+make check           # format + analyze + the Dart, Swift and Kotlin suites
+make test-android    # build the example apk, then the Kotlin unit tests
 make run-macos       # build, sync to the registered bundle, launch
 make run-macos-auto  # same, connects on launch
 make tunnel-logs     # stream the extension's os_log
@@ -108,7 +109,19 @@ because the package depends on FlutterFramework and cannot run under
 `swift test`. It raises the macOS floor of the Flutter-generated plugin package
 first: Flutter hardcodes 10.15 there, below this package's floor, and Xcode's
 test action refuses to link against the mismatch even though building tolerates
-it.
+it. CI runs it with `SWIFT_TEST_SIGNING=off`: the tests reach nothing an
+entitlement guards, and with signing off the host carries none to be refused
+for.
+
+The Windows tests live in `windows/test` and run on a Windows machine as part of
+building the example: `flutter build windows --debug` in `example`, then
+`vless_dart_test.exe` from the build tree. They start, stop and kill a stand-in
+for the core, built beside the runner, so they need neither elevation nor a
+network.
+
+CI builds every platform's native code and runs each of these suites. None of
+it brings a tunnel up: that takes a device, a VPN entitlement or an elevated
+Windows session, and is still checked by hand.
 
 ## Licensing
 

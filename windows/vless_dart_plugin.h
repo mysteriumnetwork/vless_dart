@@ -16,6 +16,7 @@
 #include <string>
 
 #include "core_process.h"
+#include "session_end.h"
 #include "wire.h"
 
 namespace vless_dart {
@@ -54,6 +55,8 @@ class VlessDartPlugin : public flutter::Plugin {
   void Dispatch(const Fields& fields);
   void PublishStatus(const std::string& status);
   void FailPending(const std::string& message);
+  // The Windows session is ending and this process with it.
+  void OnSessionEnding();
 
   static std::wstring CoreExecutablePath();
   static LRESULT CALLBACK WakeWindowProc(HWND window, UINT message,
@@ -66,12 +69,19 @@ class VlessDartPlugin : public flutter::Plugin {
 
   CoreProcess core_;
 
+  // After core_, so it is gone before the core it would stop.
+  std::unique_ptr<SessionEndWatcher> session_end_;
+
   std::mutex queue_mutex_;
   std::deque<std::string> queue_;
 
   // Touched only on the platform thread, where every channel call is made.
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> status_sink_;
   std::string status_ = "disconnected";
+  // A start has been sent and the core has not yet said anything about it.
+  bool awaiting_start_ = false;
+  // The core was stopped for the end of the session, so its exit is not news.
+  bool session_ending_ = false;
   std::map<std::string,
            std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>>
       pending_;

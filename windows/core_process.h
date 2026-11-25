@@ -11,6 +11,18 @@
 
 namespace vless_dart {
 
+// The path of |name| in the directory that holds |module_path|, or empty when
+// |module_path| names no directory.
+//
+// Never a bare file name. CreateProcess resolves one against the current
+// directory, and the app this runs in is elevated: whoever can write there
+// would choose what runs as administrator.
+std::wstring SiblingPath(const std::wstring& module_path,
+                         const std::wstring& name);
+
+// The running executable's own path, or empty if it cannot be read in full.
+std::wstring ModulePath();
+
 // Runs vless_core.exe and speaks the line protocol to it over stdin/stdout.
 //
 // The core is a child process rather than a library because a Go panic there
@@ -48,6 +60,10 @@ class CoreProcess {
 
   bool Running() const { return running_.load(); }
 
+  // How the last core ended, for saying why a tunnel was lost. Set before the
+  // empty line that reports the exit is delivered.
+  DWORD ExitCode() const { return exit_code_.load(); }
+
   // Writes one line. Returns false if the core is gone.
   bool Send(const std::string& line);
 
@@ -56,7 +72,8 @@ class CoreProcess {
   void CloseHandles();
 
   // Kills the core if the app dies without calling Stop: the tunnel would
-  // otherwise outlive the app, with the machine still routed into it.
+  // otherwise outlive the app, with the machine still routed into it. Null
+  // when the core could not be put in one, which Start reports and survives.
   HANDLE job_ = nullptr;
   HANDLE process_ = nullptr;
   HANDLE stdin_write_ = nullptr;
@@ -64,6 +81,7 @@ class CoreProcess {
 
   std::thread reader_;
   std::atomic<bool> running_{false};
+  std::atomic<DWORD> exit_code_{0};
   LineHandler on_line_;
   std::mutex write_mutex_;
 };

@@ -16,7 +16,7 @@ set(PLUGIN_NAME "vless_dart_plugin")
 # release pins every platform to the same Xray-core build. Keep in lockstep
 # with xrayCoreTag in android/build.gradle and the url in vless-core's
 # Package.swift.
-set(XRAY_CORE_TAG "xray-v26.3.27-9")
+set(XRAY_CORE_TAG "xray-v26.3.27-10")
 set(XRAY_CORE_BASE
   "https://github.com/mysteriumnetwork/vless-core/releases/download/${XRAY_CORE_TAG}")
 
@@ -32,7 +32,7 @@ set(CORE_CACHE "${CMAKE_CURRENT_BINARY_DIR}/xray/${XRAY_CORE_TAG}")
 # spawns vless_core.exe as a child, so that file runs with an elevated token:
 # it is the last thing that should be taken on trust from a URL.
 set(XRAY_CORE_SHA256_vless_core.exe
-  "4c176033b2163826c19adfb70db9465ce93fef541f68262c05d5f5ccb5dde8c8")
+  "ad5e377e68989170d0505056b2db72c0bf31c9bf6820cb1cea9a4f34100dc4b9")
 set(XRAY_CORE_SHA256_wintun.dll
   "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce")
 
@@ -94,6 +94,10 @@ list(APPEND PLUGIN_SOURCES
   "vless_dart_plugin.h"
   "core_process.cpp"
   "core_process.h"
+  "dns_policy.cpp"
+  "dns_policy.h"
+  "session_end.cpp"
+  "session_end.h"
   "wire.cpp"
   "wire.h"
 )
@@ -144,15 +148,30 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# Only the wire protocol: the rest of the plugin needs a Flutter engine and a
-# live core process, which belong in the integration tests rather than here.
+# The wire protocol, the process handling around the core, the cleanup after
+# one, and noticing the session end. The plugin class itself needs a Flutter
+# engine, which belongs in integration tests.
 add_executable(${TEST_RUNNER}
   test/wire_test.cpp
+  test/core_process_test.cpp
+  test/dns_policy_test.cpp
+  test/session_end_test.cpp
   "wire.cpp"
+  "core_process.cpp"
+  "dns_policy.cpp"
+  "session_end.cpp"
 )
 apply_standard_settings(${TEST_RUNNER})
 target_include_directories(${TEST_RUNNER} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${TEST_RUNNER} PRIVATE gtest_main gmock)
+
+# What core_process_test.cpp launches in place of vless_core.exe. The real one
+# needs an elevated session and a network to do anything at all. Built into
+# the runner's directory, which is where the test looks for it.
+set(TEST_HELPER "${PROJECT_NAME}_test_helper")
+add_executable(${TEST_HELPER} test/core_process_test_helper.cpp)
+apply_standard_settings(${TEST_HELPER})
+add_dependencies(${TEST_RUNNER} ${TEST_HELPER})
 
 include(GoogleTest)
 gtest_discover_tests(${TEST_RUNNER})
