@@ -19,6 +19,11 @@ constexpr wchar_t kCoreExecutable[] = L"vless_core.exe";
 // Registered once per process; a second engine reuses it.
 constexpr wchar_t kWakeWindowClass[] = L"VlessDartWakeWindow";
 
+// How long the core gets to unwind when the session is ending. Windows allows
+// an app a few seconds for the whole of WM_ENDSESSION before it treats it as
+// hung, and the DNS rule is already gone by the time this is spent.
+constexpr DWORD kSessionEndGraceMs = 2000;
+
 // A counter the wire did not carry, or carried as anything but digits, would
 // otherwise be interpolated straight into the JSON and make it unparseable --
 // which Dart swallows, reporting zero bytes with no diagnostic anywhere.
@@ -122,6 +127,27 @@ VlessDartPlugin::VlessDartPlugin(flutter::PluginRegistrarWindows*) {
         "vless_dart: no wake window; core events drain off the platform "
         "thread\n");
   }
+
+  // A second window, because the one above cannot do this: a message-only
+  // window is never told that the session is ending.
+  session_end_ =
+      std::make_unique<SessionEndWatcher>([this] { OnSessionEnding(); });
+}
+
+void VlessDartPlugin::OnSessionEnding() {
+  // A logoff, a restart or a shutdown. The app is terminated rather than
+  // closed, so the destructor below never runs, and the job object then
+  // kills the core where it stands. What that leaves behind is the core's
+  // DNS rule, and with it a machine that resolves nothing the next time it
+  // is started -- before anyone has opened this app again to notice.
+  //
+  // The rule first and by hand: it takes no time, and there is no knowing
+  // how much of what follows Windows will wait for.
+  session_ending_ = true;
+  RemoveDnsRule(kCoreDnsRule);
+  core_.Stop(kSessionEndGraceMs);
+  // Again, for a core that was mid-start and installed it in between.
+  RemoveDnsRule(kCoreDnsRule);
 }
 
 LRESULT CALLBACK VlessDartPlugin::WakeWindowProc(HWND window, UINT message,
@@ -145,6 +171,8 @@ LRESULT CALLBACK VlessDartPlugin::WakeWindowProc(HWND window, UINT message,
 }
 
 VlessDartPlugin::~VlessDartPlugin() {
+  // Before anything it would act on is taken apart.
+  session_end_.reset();
   // Stop first, window second. Stop joins the reader thread, so nothing can
   // be appended after it returns -- and while the window still exists the
   // reader posts to it rather than taking OnCoreLine's fallback, which would
@@ -334,12 +362,13 @@ void VlessDartPlugin::Drain() {
       // The core exited. Anything still waiting on it never gets an answer.
       FailPending("the core exited");
       // It is only ever stopped by the destructor, after which nothing
-      // drains, so reaching here means it went on its own: a crash, or
-      // something killed it. If that took a tunnel with it, or a start that
+      // drains, or for the end of the session. Otherwise reaching here means
+      // it went on its own: a crash, or something killed it. If that took a tunnel with it, or a start that
       // was never answered, "disconnected" alone gives no reason -- and for
       // the unanswered start it is not even an event, being the status
       // already.
-      if ((status_ != "disconnected" || awaiting_start_) && status_sink_) {
+      if (!session_ending_ && (status_ != "disconnected" || awaiting_start_) &&
+          status_sink_) {
         status_sink_->Error("core_exited",
                             "the core exited unexpectedly with code " +
                                 std::to_string(core_.ExitCode()));

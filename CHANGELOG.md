@@ -8,6 +8,10 @@
   down. The rule points every lookup on the machine at a resolver inside the
   tunnel, and until now only the next connect removed a leftover -- which an
   app that must reach its API by name could never get to.
+* Windows: the same rule is removed, and the core stopped, when the Windows
+  session ends. A logoff, restart or shutdown terminates the app without
+  running anything it would run on quit, so a machine shut down with a tunnel
+  up came back with no DNS until the app was next opened.
 * Windows: a core that exits on its own is reported on the status stream with
   its exit code, instead of as a bare `disconnected`, or as nothing at all
   when it died before answering a start.

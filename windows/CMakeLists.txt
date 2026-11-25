@@ -96,6 +96,8 @@ list(APPEND PLUGIN_SOURCES
   "core_process.h"
   "dns_policy.cpp"
   "dns_policy.h"
+  "session_end.cpp"
+  "session_end.h"
   "wire.cpp"
   "wire.h"
 )
@@ -146,16 +148,18 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# The wire protocol, the process handling around the core, and the cleanup
-# after one. The plugin class itself needs a Flutter engine, which belongs in
-# integration tests.
+# The wire protocol, the process handling around the core, the cleanup after
+# one, and noticing the session end. The plugin class itself needs a Flutter
+# engine, which belongs in integration tests.
 add_executable(${TEST_RUNNER}
   test/wire_test.cpp
   test/core_process_test.cpp
   test/dns_policy_test.cpp
+  test/session_end_test.cpp
   "wire.cpp"
   "core_process.cpp"
   "dns_policy.cpp"
+  "session_end.cpp"
 )
 apply_standard_settings(${TEST_RUNNER})
 target_include_directories(${TEST_RUNNER} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
