@@ -14,8 +14,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mysteriumnetwork/vless-core",
       "state" : {
-        "revision" : "a3acd30f65d986dfce8f675e4792c63627887cd3",
-        "version" : "1.4.0"
+        "revision" : "f8d3f12070c83d8523489fedeb7dbed73b3ea117",
+        "version" : "1.4.1"
       }
     }
   ],
