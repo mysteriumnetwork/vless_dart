@@ -69,7 +69,10 @@ class Lines {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t longest = 0;
     for (const std::string& line : lines_) {
-      longest = std::max(longest, line.size());
+      // Not std::max: windows.h defines max as a macro under MSVC.
+      if (line.size() > longest) {
+        longest = line.size();
+      }
     }
     return longest;
   }
