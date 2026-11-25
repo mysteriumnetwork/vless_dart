@@ -69,7 +69,10 @@ internal object VlessIpc {
     fun statusOf(name: String?): ConnectionStatus =
         ConnectionStatus.entries.firstOrNull { it.name == name } ?: ConnectionStatus.unknown
 
-    fun inCoreProcess(): Boolean = processName().endsWith(CORE_PROCESS_SUFFIX)
+    fun inCoreProcess(): Boolean = isCoreProcess(processName())
+
+    /** The rule on its own, so it can be tested without a device. */
+    fun isCoreProcess(name: String): Boolean = name.endsWith(CORE_PROCESS_SUFFIX)
 
     fun processName(): String =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
