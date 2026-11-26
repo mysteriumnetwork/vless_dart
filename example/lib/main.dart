@@ -22,6 +22,16 @@ const _sampleUri =
 /// Connect as soon as the app is ready, so a run can be driven from the CLI.
 const _autoConnect = bool.fromEnvironment('VLESS_AUTOCONNECT');
 
+/// `--dart-define=VLESS_CONNECTIONS=200` adds that many open connections to the
+/// hands-free pass. The extension's memory follows its open sessions, and iOS
+/// ends it at 50 MB, so this is what shows how much room is left. An iOS app
+/// can hold about 200 sockets itself; ask for more and the rest fail to open.
+const _loadConnections = int.fromEnvironment('VLESS_CONNECTIONS');
+
+/// Disconnect when the hands-free pass is done, so a device driven from the
+/// CLI is not left on the tunnel, and the next install starts a new extension.
+const _autoDisconnect = bool.fromEnvironment('VLESS_AUTODISCONNECT');
+
 /// Each platform carries its own packet tunnel extension target.
 final String _providerBundleIdentifier = Platform.isMacOS
     ? 'com.mysteriumvpn.vlessDartExample.XrayTunnelMac'
@@ -249,6 +259,62 @@ class _HomePageState extends State<_HomePage> {
         '(${mbps.toStringAsFixed(1)} Mbps)';
   }
 
+  /// Opens [count] TLS connections through the tunnel, holds them, then asks
+  /// each whether it still answers: past its session cap the bridge ends the
+  /// oldest ones to admit the new.
+  Future<String> _connectionLoad(int count, {Duration hold = const Duration(seconds: 25)}) async {
+    const hosts = [
+      '1.1.1.1',
+      '1.0.0.1',
+      'www.cloudflare.com',
+      'www.google.com',
+      'www.wikipedia.org',
+    ];
+    var opened = 0;
+    var failed = 0;
+    var alive = 0;
+
+    Future<void> one(int index) async {
+      final host = hosts[index % hosts.length];
+      SecureSocket? socket;
+      var open = false;
+      try {
+        socket = await SecureSocket.connect(host, 443, timeout: const Duration(seconds: 20));
+        final replies = StreamIterator<List<int>>(socket);
+        socket.write('HEAD / HTTP/1.1\r\nHost: $host\r\nConnection: keep-alive\r\n\r\n');
+        await socket.flush();
+        if (!await replies.moveNext().timeout(const Duration(seconds: 20))) {
+          throw const SocketException('closed before answering');
+        }
+        open = true;
+        opened++;
+        await Future<void>.delayed(hold);
+        socket.write('HEAD / HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n');
+        await socket.flush();
+        if (await replies.moveNext().timeout(const Duration(seconds: 10))) {
+          alive++;
+        }
+      } catch (_) {
+        if (!open) {
+          failed++;
+        }
+      } finally {
+        socket?.destroy();
+      }
+    }
+
+    final connections = <Future<void>>[];
+    for (var i = 0; i < count; i++) {
+      connections.add(one(i));
+      // Fifty new connections a second.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await Future<void>.delayed(const Duration(seconds: 8));
+    debugPrint('[EXAMPLE] connections: opened=$opened failed=$failed');
+    await Future.wait(connections);
+    return 'opened=$opened failed=$failed, after ${hold.inSeconds}s alive=$alive dead=${opened - alive}';
+  }
+
   /// One hands-free pass: where we exit, then what the tunnel costs under load.
   Future<void> _autoCheck() async {
     await Future<void>.delayed(const Duration(seconds: 2));
@@ -261,6 +327,19 @@ class _HomePageState extends State<_HomePage> {
       debugPrint('[EXAMPLE] load test: ${await _loadTest()}');
     } catch (e) {
       debugPrint('[EXAMPLE] load test failed: $e');
+    }
+    if (_loadConnections > 0) {
+      try {
+        debugPrint('[EXAMPLE] connection load: ${await _connectionLoad(_loadConnections)}');
+      } catch (e) {
+        debugPrint('[EXAMPLE] connection load failed: $e');
+      }
+    }
+    if (_autoDisconnect) {
+      // Long enough for the counters to show what the load left behind.
+      await Future<void>.delayed(const Duration(seconds: 10));
+      debugPrint('[EXAMPLE] pass complete; disconnecting');
+      await _vpn.disconnect();
     }
   }
 
